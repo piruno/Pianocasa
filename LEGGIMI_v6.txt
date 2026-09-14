@@ -1,0 +1,14 @@
+PIANOCASA — AGGIORNAMENTO v6
+
+Sostituisci su GitHub questi file:
+- app.js
+- style.css
+- sw.js
+
+index.html è incluso solo per completezza e può essere ricaricato senza problemi.
+
+MODIFICHE
+1. Tap sulla notifica: se PianoCasa è già aperta, il service worker invia un comando diretto all'app e apre subito Riepilogo menu del giorno. Se l'app è chiusa, usa comunque ?menu=DATA e il riepilogo si apre appena caricati i dati.
+2. Le tipologie alimentari sono molto più evidenti: banda colorata grande e sticky, icona, 'SEZIONE X DI Y', stato DA SCEGLIERE/COMPLETA.
+3. Dopo una scelta la sezione successiva viene posizionata con la sua intestazione all'inizio dello schermo, non a metà elenco.
+4. Tutti gli alimenti, sia per Vincenzo sia per Anna, sono ordinati alfabeticamente A–Z all'interno di ogni sezione.

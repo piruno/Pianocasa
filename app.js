@@ -57,9 +57,12 @@ function setCurrentDate(date){currentDate=date;expandedCats.clear();scrollAfterR
 function scrollToCategory(id){
   if(!id)return;
   requestAnimationFrame(()=>setTimeout(()=>{
-    const el=document.getElementById('choice_'+id);
-    if(el)el.scrollIntoView({behavior:'smooth',block:'center'});
-  },80));
+    const el=document.getElementById('choice_'+id);if(!el)return;
+    const head=document.querySelector('header');
+    const offset=(head?.getBoundingClientRect().height||64)+10;
+    const top=window.scrollY+el.getBoundingClientRect().top-offset;
+    window.scrollTo({top:Math.max(0,top),behavior:'smooth'});
+  },120));
 }
 function missingTextByMeal(p,d){
   return p.meals.map(m=>{
@@ -106,8 +109,8 @@ function renderToday(){
       box.id='choice_'+c.id;
       box.innerHTML=`<div class="choiceHeader">
         <div class="stepNumber">${idx+1}</div>
-        <div class="choiceTitle"><div class="choiceLabel">${meta.icon} ${c.label}</div><div class="choiceHint">${chosen?'Scelta effettuata':'Scegli 1 alternativa'}</div></div>
-        <div class="choiceStatus ${chosen?'ok':'todo'}">${chosen?'✓':'DA SCEGLIERE'}</div>
+        <div class="choiceTitle"><div class="choiceKicker">SEZIONE ${idx+1} DI ${meal.categories.length}</div><div class="choiceLabel">${meta.icon} ${c.label}</div><div class="choiceHint">${chosen?'Scelta effettuata':'Scegli 1 alternativa'}</div></div>
+        <div class="choiceStatus ${chosen?'ok':'todo'}">${chosen?'✓ COMPLETA':'DA SCEGLIERE'}</div>
       </div>
       ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${chosen.grams!=null?' — '+chosen.grams+' g':''}</b><small>${chosen.kcal} kcal</small></div><button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button></div>`:''}
       <div class="options ${isOpen?'':'collapsed'}"></div>`;
@@ -120,7 +123,8 @@ function renderToday(){
         };
       }
 
-      for(const it of c.items){
+      const sortedItems=[...c.items].sort((a,b)=>a.name.localeCompare(b.name,'it',{sensitivity:'base'}));
+      for(const it of sortedItems){
         const b=document.createElement('button');b.className='opt';
         const sel=d.selections?.[c.id]===it.id;if(sel)b.classList.add('selected');
         const block=blockedReason(p,currentDate,c.id,it.id,d);b.disabled=!sel&&!!block;
@@ -196,4 +200,18 @@ $('enablePush').onclick=async()=>{try{if(!('serviceWorker'in navigator)||!('Push
 function urlB64(s){const pad='='.repeat((4-s.length%4)%4),b64=(s+pad).replace(/-/g,'+').replace(/_/g,'/'),raw=atob(b64),out=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);return out}
 $('importSeed').onclick=async()=>{try{const f=$('seedFile').files[0];if(!f)throw new Error('Seleziona il file JSON privato.');const seed=JSON.parse(await f.text());const b=writeBatch(db);for(const p of seed.profiles)b.set(doc(db,'households',householdId,'profiles',p.id),{...p,startDate:p.startDate||isoToday(),endDate:p.endDate||addDays(isoToday(),13)});await b.commit();$('seedMsg').textContent='Diete importate nel cloud privato.'}catch(e){$('seedMsg').textContent=e.message}}
 function renderRules(){const p=profiles[currentProfileId],box=$('rulesList');if(!p||!box)return;box.innerHTML='';for(const r of p.rules||[]){const d=document.createElement('div');d.className='rule';d.innerHTML=`<b>${r.label}</b><span class="muted">${r.disabledWhen?'bloccato quando '+r.disabledWhen:`massimo ${r.maxCount} ogni ${r.days} giorni`} · ${r.source||''}</span>`;box.appendChild(d)}for(const mn of p.minimums||[]){const d=document.createElement('div');d.className='rule';d.innerHTML=`<b>${mn.label}</b><span class="muted">obiettivo ${mn.minCount}${mn.targetMax?'–'+mn.targetMax:''} ogni ${mn.days} giorni</span>`;box.appendChild(d)}}
-if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
+function handleMenuDeepLink(date){
+  const d=date||new URL(location.href).searchParams.get('menu')||isoToday();
+  menuOverlayDate=d;currentDate=d;
+  const u=new URL(location.href);u.searchParams.set('menu',d);history.replaceState({},'',u);
+  if(Object.keys(profiles).length)renderMenuOverlay(d);
+}
+if('serviceWorker'in navigator){
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data?.type==='OPEN_MENU')handleMenuDeepLink(e.data.date);
+  });
+  navigator.serviceWorker.register('./sw.js').catch(()=>{});
+}
+window.addEventListener('pageshow',()=>{
+  const d=new URL(location.href).searchParams.get('menu');if(d)handleMenuDeepLink(d);
+});

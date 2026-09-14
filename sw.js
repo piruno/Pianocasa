@@ -1,4 +1,4 @@
-const CACHE="pianocasa-v5";
+const CACHE="pianocasa-v6";
 const ASSETS=["./","./index.html","./style.css","./app.js","./config.js","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",e=>{
@@ -39,15 +39,16 @@ self.addEventListener("push",e=>{
 
 self.addEventListener("notificationclick",e=>{
   e.notification.close();
-  const target=new URL(e.notification.data?.url||"./",self.location.href).href;
+  const target=new URL(e.notification.data?.url||"./",self.location.href);
+  const date=target.searchParams.get('menu');
   e.waitUntil((async()=>{
     const wins=await clients.matchAll({type:"window",includeUncontrolled:true});
-    for(const c of wins){
-      if(c.url.startsWith(self.registration.scope)){
-        if("navigate" in c) await c.navigate(target);
-        return c.focus();
-      }
+    const appClient=wins.find(c=>c.url.startsWith(self.registration.scope));
+    if(appClient){
+      await appClient.focus();
+      appClient.postMessage({type:'OPEN_MENU',date,url:target.href});
+      return;
     }
-    return clients.openWindow(target);
+    return clients.openWindow(target.href);
   })());
 });
