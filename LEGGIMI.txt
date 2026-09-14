@@ -1,0 +1,15 @@
+AGGIORNAMENTO PIANOCASA — CANCELLAZIONE EXTRA
+
+Sostituisci nel repository GitHub i due file:
+- app.js
+- sw.js
+
+Novità:
+- ogni voce EXTRA della lista spesa ha il pulsante "Elimina";
+- viene chiesta conferma prima della cancellazione;
+- la cancellazione si sincronizza subito sui due dispositivi;
+- la vecchia spunta associata viene eliminata;
+- il service worker è aggiornato a v4 e recupera online la versione più recente dell'app.
+
+Le voci generate dalle diete NON hanno il pulsante Elimina:
+per rimuoverle dalla lista bisogna cambiare la scelta del pasto nel calendario.
