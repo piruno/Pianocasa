@@ -1,0 +1,37 @@
+PIANOCASA — AGGIORNAMENTO UX MENU v5
+
+Sostituisci nel repository questi file:
+- index.html
+- app.js
+- style.css
+- sw.js
+- send-reminders.mjs
+
+COSA CAMBIA
+
+1) NOTIFICHE
+- Il testo della notifica è volutamente corto: iOS decide autonomamente quante righe mostra.
+- Toccando la notifica si apre PianoCasa direttamente nel "Menu del giorno".
+- Il riepilogo mostra entrambi i profili, tutti i pasti, le categorie, gli alimenti e le grammature.
+- Anna, se ha "ricevi anche il menu dell'altro profilo", riceve una sola notifica combinata Anna + Vincenzo.
+- Le notifiche automatiche restano massimo una al giorno.
+- Se lanci "Run workflow" manualmente da GitHub, ora puoi ricevere più notifiche di prova nello stesso giorno: il test ignora il blocco giornaliero e l'orario.
+
+2) SCELTA ALIMENTI
+- Ogni pasto è separato da un'intestazione molto evidente.
+- Ogni sezione è numerata (1, 2, 3...) e ha colore/icona distinti.
+- Se non hai ancora scelto nulla compare "DA SCEGLIERE".
+- Dopo una scelta, la sezione si richiude e mostra solo l'alimento scelto + "Cambia".
+- Se era una sezione mancante, l'app apre/scorre automaticamente alla prossima sezione ancora da completare.
+- Toccare di nuovo l'alimento già scelto non lo deseleziona accidentalmente.
+
+3) CONTROLLO COMPLETEZZA
+- In alto compare quante scelte mancano.
+- Viene mostrato esattamente in quali pasti e categorie manca qualcosa.
+- "Vai alla prima mancante" porta direttamente al primo punto incompleto.
+- Ogni pasto mostra X/Y scelte e un footer "completo/incompleto".
+- Nel calendario ogni giorno indica quante scelte mancano.
+
+NOTA
+Il sistema operativo può troncare qualunque notifica push: non è controllabile dalla web-app.
+Per questo la notifica ora è breve e il contenuto completo vive dentro PianoCasa.

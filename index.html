@@ -12,12 +12,22 @@
 <section id="onboardView" class="card hidden"><h2>Collega il tuo profilo</h2><div id="onboardBody"></div></section>
 <section id="appView" class="hidden">
 <nav class="tabs"><button data-tab="today" class="active">Oggi</button><button data-tab="calendar">Calendario</button><button data-tab="shopping">Spesa</button><button data-tab="settings">Impostazioni</button></nav>
-<section id="today" class="tab active"><div class="card"><div class="row"><button id="prevDay">‹</button><div class="center"><b id="todayTitle"></b><div id="profileLabel" class="muted"></div></div><button id="nextDay">›</button></div><div class="summary"><div><span id="kcalTotal" class="big">0</span> kcal</div><span id="kcalState" class="pill">da completare</span></div><div class="progress"><div id="kcalBar"></div></div><div id="freqInfo" class="small"></div><div class="actions"><button id="copyPrev">Copia giorno precedente</button><button id="clearDay" class="danger">Azzera</button></div></div><div id="meals"></div></section>
+<section id="today" class="tab active"><div class="card"><div class="row"><button id="prevDay">‹</button><div class="center"><b id="todayTitle"></b><div id="profileLabel" class="muted"></div></div><button id="nextDay">›</button></div><div class="summary"><div><span id="kcalTotal" class="big">0</span> kcal</div><span id="kcalState" class="pill">da completare</span></div><div class="progress"><div id="kcalBar"></div></div><div id="completionBanner" class="completionBanner"></div><div id="freqInfo" class="small"></div><div class="actions"><button id="openMenuSummary">Riepilogo menu</button><button id="copyPrev">Copia giorno precedente</button><button id="clearDay" class="danger">Azzera</button></div></div><div id="meals"></div></section>
 <section id="calendar" class="tab"><div class="card"><h2>Periodo e profilo</h2><div class="grid2"><label>Visualizza<select id="profileSelect"></select></label><label>Inizio<input type="date" id="startDate"></label><label>Fine<input type="date" id="endDate"></label></div><button id="savePeriod" class="primary">Salva periodo</button></div><div class="card"><div id="calendarDays"></div></div></section>
 <section id="shopping" class="tab"><div class="card"><div class="row"><div><h2>Lista della spesa</h2><div id="shopInfo" class="muted"></div></div><select id="shopSort"><option value="dept">Per reparto</option><option value="alpha">A–Z</option></select></div><div class="actions"><button id="addExtra">+ Extra</button><button id="hideChecked">Nascondi presi: NO</button><button id="shareShop">Condividi</button></div></div><div class="card"><div id="shoppingList"></div></div></section>
 <section id="settings" class="tab"><div class="card"><h2>Account e notifiche</h2><div id="memberInfo"></div><label>Ora notifica mattutina<input id="notifyAt" type="time" value="07:30"></label><label class="switch"><input id="includePartner" type="checkbox"><span>Su questo telefono ricevi anche il menu dell'altro profilo</span></label><div class="actions"><button id="saveNotify" class="primary">Salva</button><button id="enablePush">Attiva notifiche su questo iPhone</button></div><div id="pushMsg" class="msg"></div></div><div class="card"><h2>Famiglia</h2><div id="inviteArea"></div></div><div class="card"><h2>Importa diete private</h2><p class="muted">Solo il primo account deve farlo. Il file privato non va caricato su GitHub.</p><input id="seedFile" type="file" accept="application/json"><button id="importSeed" class="primary">Importa</button><div id="seedMsg" class="msg"></div></div><div class="card"><h2>Limiti alimentari</h2><div id="rulesList"></div></div></section>
 </section>
 </main>
+
+<section id="menuOverlay" class="menuOverlay hidden">
+  <div class="menuOverlayTop">
+    <button id="closeMenuOverlay" class="ghost menuClose">✕</button>
+    <div class="center"><div class="menuOverlayEyebrow">MENU DEL GIORNO</div><h2 id="menuOverlayDate"></h2></div>
+    <div class="menuDateNav"><button id="menuPrev">‹</button><button id="menuNext">›</button></div>
+  </div>
+  <div id="menuOverlayBody" class="menuOverlayBody"></div>
+</section>
+
 <div id="modal" class="modal hidden"><div class="modalbox"><h3>Aggiungi EXTRA</h3><input id="extraName" placeholder="es. detersivo"><div class="grid2"><input id="extraQty" type="number" min="0" step="0.1" placeholder="Quantità"><input id="extraUnit" placeholder="pz / confezioni / L"></div><select id="extraDept"><option>Casa e pulizia</option><option>Bevande</option><option>Igiene</option><option>Altro</option></select><div class="actions"><button id="saveExtra" class="primary">Aggiungi</button><button id="cancelExtra">Annulla</button></div></div></div>
 <script src="config.js"></script><script type="module" src="app.js"></script>
 </body></html>

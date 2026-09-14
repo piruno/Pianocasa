@@ -1,4 +1,4 @@
-const CACHE="pianocasa-v4";
+const CACHE="pianocasa-v5";
 const ASSETS=["./","./index.html","./style.css","./app.js","./config.js","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",e=>{
@@ -30,7 +30,7 @@ self.addEventListener("push",e=>{
   let d={};
   try{d=e.data.json()}catch{d={title:"PianoCasa",body:e.data?.text()||"Hai un promemoria"}}
   e.waitUntil(self.registration.showNotification(d.title||"PianoCasa",{
-    body:d.body||"",
+    body:d.body||"Tocca per aprire il menu completo.",
     icon:"./icon-192.png",
     badge:"./icon-192.png",
     data:{url:d.url||"./"}
@@ -39,5 +39,15 @@ self.addEventListener("push",e=>{
 
 self.addEventListener("notificationclick",e=>{
   e.notification.close();
-  e.waitUntil(clients.openWindow(e.notification.data?.url||"./"));
+  const target=new URL(e.notification.data?.url||"./",self.location.href).href;
+  e.waitUntil((async()=>{
+    const wins=await clients.matchAll({type:"window",includeUncontrolled:true});
+    for(const c of wins){
+      if(c.url.startsWith(self.registration.scope)){
+        if("navigate" in c) await c.navigate(target);
+        return c.focus();
+      }
+    }
+    return clients.openWindow(target);
+  })());
 });
