@@ -1,0 +1,34 @@
+PIANOCASA v8 — PASTI LIBERI, STORICO, COPIA SETTIMANA, FIX MELAGRANA
+
+Sostituisci su GitHub:
+- app.js
+- index.html
+- style.css
+- sw.js
+
+1) MELAGRANA
+Era un errore nel file dati dell'app: Melagrana aveva il tag "rich_cheese".
+Per questo veniva bloccata insieme a Feta/Grana/Stracchino quando il limite
+di quel gruppo era raggiunto. La v8 rimuove automaticamente quel tag.
+NON serve reimportare le diete.
+
+2) PASTI LIBERI AUTOMATICI (ENTRAMBI I PROFILI)
+- sabato cena
+- domenica pranzo
+Sono automaticamente completi, non richiedono alimenti, compaiono come
+"Pasto libero" nei riepiloghi e non entrano nella lista della spesa.
+
+3) COPIA 1ª SETTIMANA → 2ª
+Il vecchio pulsante "Copia giorno precedente" è sostituito da un comando
+che copia i primi 7 giorni del profilo corrente nei 7 giorni successivi.
+
+4) STORICO
+Nuova scheda "Storico":
+- Vincenzo / Anna / Entrambi
+- menu salvati giorno per giorno
+- copia singolo giorno verso una data scelta
+- copia intera settimana verso un'altra settimana
+
+5) AUTO-SCROLL
+Quando completi l'ultima scelta mancante della giornata, PianoCasa torna
+automaticamente in cima per permetterti di passare subito al giorno seguente.

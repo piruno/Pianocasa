@@ -58,3 +58,27 @@
   .choiceStatus{grid-column:2;margin-top:2px}
   .choiceLabel{font-size:16px}
 }
+
+
+/* ===== PianoCasa v8: pasto libero, storico e copia settimane ===== */
+.freeMeal .mealhead{background:linear-gradient(135deg,#7c3aed,#5b21b6)}
+.freeMealBox{display:flex;gap:14px;align-items:center;padding:22px 16px;background:linear-gradient(135deg,#faf5ff,#f5f3ff);border-bottom:1px solid #e9d5ff}
+.freeMealIcon{font-size:36px}
+.freeMealBox b{font-size:20px;color:#5b21b6}
+.freeMealBox p{margin:5px 0 0;font-size:12px;line-height:1.45;color:#6b7280}
+.menuFreeMeal{padding:15px 12px;background:#faf5ff;color:#5b21b6;font-weight:850;border-top:1px solid #ede9fe}
+.tabs{grid-template-columns:repeat(5,1fr)}
+.tabs button{font-size:12px;padding:10px 5px}
+.historyCard{background:#fff;border:1px solid var(--line);border-radius:17px;padding:14px;margin:0 0 12px;box-shadow:0 4px 16px rgba(15,30,25,.035)}
+.historyHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}
+.historyHead h3{margin:4px 0 0;font-size:17px}
+.historyMeals{border:1px solid #e2e8e5;border-radius:13px;overflow:hidden}
+.historyMeal{display:grid;grid-template-columns:95px 1fr;gap:10px;padding:9px 10px;border-bottom:1px solid #edf2f0;font-size:11px}
+.historyMeal:last-child{border-bottom:0}.historyMeal span{color:#53635e;line-height:1.4}
+.historyCopy{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:end;margin-top:11px}
+.historyCopy label{font-size:11px;color:var(--muted)}.historyCopy input{margin-top:5px}
+.emptyHistory{background:#fff;border:1px dashed #cbd5d1;border-radius:15px;padding:24px;text-align:center;color:var(--muted)}
+@media(max-width:560px){
+  .tabs{grid-template-columns:repeat(5,1fr);gap:4px}.tabs button{font-size:10.5px;padding:9px 3px}
+  .historyMeal{grid-template-columns:1fr}.historyCopy{grid-template-columns:1fr}
+}
