@@ -1,0 +1,14 @@
+PIANOCASA — AGGIORNAMENTO v7 LOGIN PERSISTENTE
+
+Sostituisci nel repository GitHub:
+- app.js
+- sw.js
+
+Cosa cambia:
+- Firebase Auth viene impostato esplicitamente su browserLocalPersistence.
+- Dopo l'aggiornamento fai login UNA VOLTA su ciascun iPhone.
+- Da quel momento, chiudendo e riaprendo PianoCasa dall'icona Home, l'account deve restare collegato.
+- Il pulsante "Esci" continua a scollegare volontariamente l'account.
+- La cache PWA è passata a v7 per forzare il caricamento della nuova versione.
+
+Se iOS ha la navigazione privata attiva o se vengono eliminati manualmente i dati dei siti, il login può comunque essere perso.

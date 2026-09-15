@@ -1,12 +1,30 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
 let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
-if(badConfig){$('setupView').classList.remove('hidden')}else{app=initializeApp(C.firebase);auth=getAuth(app);db=getFirestore(app);$('authView').classList.remove('hidden');onAuthStateChanged(auth,handleAuth)}
+if(badConfig){
+  $('setupView').classList.remove('hidden')
+}else{
+  app=initializeApp(C.firebase);
+  auth=getAuth(app);
+  db=getFirestore(app);
+  $('authView').classList.remove('hidden');
+  initPersistentAuth();
+}
+
+async function initPersistentAuth(){
+  try{
+    // Mantiene l'accesso tra chiusure e riaperture della PWA/iPhone.
+    await setPersistence(auth,browserLocalPersistence);
+  }catch(e){
+    console.warn('Persistenza login non disponibile:',e);
+  }
+  onAuthStateChanged(auth,handleAuth);
+}
 function isoToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function parseISO(s){const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}
 function addDays(s,n){const d=parseISO(s);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
