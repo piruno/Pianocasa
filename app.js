@@ -3,9 +3,12 @@ import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWith
 import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
-let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
+let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
+let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaPointerActive=false,alphaPointerId=null;
+const TOSANO_STORE_ID='iper-tosano-pradamano';
+
 if(badConfig){
   $('setupView').classList.remove('hidden')
 }else{
@@ -62,9 +65,27 @@ function clearListeners(){listeners.forEach(f=>f());listeners=[]}
 function renderOnboard(){show('onboardView');$('onboardBody').innerHTML=`<p>Scegli solo la prima volta.</p><div class="actions"><button id="createHome" class="primary">Sono Vincenzo · crea famiglia</button></div><hr><label>Codice invito<input id="inviteCode" maxlength="14" placeholder="codice da Vincenzo"></label><button id="joinHome" class="primary" style="margin-top:8px">Sono Anna · entra</button><div id="onMsg" class="msg"></div>`;$('createHome').onclick=createHousehold;$('joinHome').onclick=joinHousehold}
 async function createHousehold(){try{const hid=crypto.randomUUID();const b=writeBatch(db);b.set(doc(db,'households',hid),{createdAt:Date.now(),label:'Casa'});b.set(doc(db,'households',hid,'members',user.uid),{uid:user.uid,email:user.email,profileId:'vincenzo',displayName:'Vincenzo',notifyAt:'07:30',includePartnerMenu:false,owner:true});b.set(doc(db,'users',user.uid),{householdId:hid,profileId:'vincenzo',email:user.email});await b.commit();location.reload()}catch(e){$('onMsg').textContent=e.message}}
 async function joinHousehold(){try{const code=$('inviteCode').value.trim().toUpperCase();const invRef=doc(db,'invites',code),s=await getDoc(invRef);if(!s.exists())throw new Error('Codice non trovato.');const inv=s.data();if(inv.claimedBy)throw new Error('Codice già usato.');await updateDoc(invRef,{claimedBy:user.uid,claimedAt:Date.now()});const b=writeBatch(db);b.set(doc(db,'households',inv.householdId,'members',user.uid),{uid:user.uid,email:user.email,profileId:inv.profileId,displayName:inv.displayName,notifyAt:'07:30',includePartnerMenu:true,owner:false,inviteCode:code});b.set(doc(db,'users',user.uid),{householdId:inv.householdId,profileId:inv.profileId,email:user.email});await b.commit();location.reload()}catch(e){$('onMsg').textContent=e.message}}
-async function startApp(){show('appView');const ms=await getDoc(doc(db,'households',householdId,'members',user.uid));member=ms.data();currentProfileId=currentProfileId||member.profileId;listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll()}));listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll()}));listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping()}));listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{checks={};s.forEach(x=>checks[x.id]=x.data());renderShopping()}));renderMember();}
-function renderAll(){if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderHistory();renderRules();if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
-function tab(id){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));if(id==='shopping')renderShopping();if(id==='history')renderHistory()}
+async function startApp(){
+  show('appView');
+  const ms=await getDoc(doc(db,'households',householdId,'members',user.uid));
+  member=ms.data();currentProfileId=currentProfileId||member.profileId;
+  listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping();renderPortions()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{checks={};s.forEach(x=>checks[x.id]=x.data());renderShopping();renderPortions()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'storeMappings'),s=>{storeMappings={};s.forEach(x=>storeMappings[x.id]=x.data());renderShopping()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'portionChecks'),s=>{portionChecks={};s.forEach(x=>portionChecks[x.id]=x.data());renderPortions()}));
+  renderMember();setupAlphaIndex();syncShopPeriodControls();
+}
+function renderAll(){if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
+function tab(id){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+  if(id==='shopping')renderShopping();
+  if(id==='portions')renderPortions();
+  if(id==='history')renderHistory();
+  renderAlphaIndex();
+}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function renderProfileSelect(){const s=$('profileSelect');if(!s)return;s.innerHTML='';Object.values(profiles).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.displayName;o.selected=p.id===currentProfileId;s.appendChild(o)});s.onchange=()=>{currentProfileId=s.value;const p=profiles[currentProfileId];currentDate=p.startDate||isoToday();renderAll()}}
 async function saveDay(pid,date,d){const p=profiles[pid];d.summary=buildSummary(p,d);d.kcal=totalKcal(p,d);d.updatedAt=Date.now();await setDoc(doc(db,'households',householdId,'days',`${pid}_${date}`),d,{merge:true})}
@@ -218,10 +239,263 @@ $('copyFirstWeek').onclick=async()=>{
 $('clearDay').onclick=async()=>{if(confirm('Azzero questo giorno?'))await deleteDoc(doc(db,'households',householdId,'days',`${currentProfileId}_${currentDate}`))};
 function renderCalendar(){const p=profiles[currentProfileId];if(!p)return;$('startDate').value=p.startDate||'';$('endDate').value=p.endDate||'';const box=$('calendarDays');box.innerHTML='';for(const date of datesBetween(p.startDate,p.endDate)){const d=dayDoc(p.id,date),miss=missingCategories(p,d).length,totalCats=activeCats(p,date).length,free=hasFreeMeal(p,date),row=document.createElement('div');row.className='dayrow';row.innerHTML=`<button><b>${fmt(date)}</b><div class="muted">${miss?`mancano ${miss} scelte su ${totalCats}`:`${totalKcal(p,d)} kcal${free?' + pasto libero':''} · tutte le sezioni complete`}</div></button><span class="pill ${miss?'warn':'good'}">${miss?'incompleto':'completo'}</span>`;row.querySelector('button').onclick=()=>{setCurrentDate(date);tab('today')};box.appendChild(row)}}
 $('savePeriod').onclick=async()=>{const p=profiles[currentProfileId],s=$('startDate').value,e=$('endDate').value;if(!s||!e||s>e){alert('Controlla le date');return}await updateDoc(doc(db,'households',householdId,'profiles',p.id),{startDate:s,endDate:e});currentDate=s};
-function collectShop(){const map=new Map();for(const p of Object.values(profiles)){for(const d of days.filter(x=>x.profileId===p.id&&(!p.startDate||x.date>=p.startDate)&&(!p.endDate||x.date<=p.endDate))){for(const c of activeCats(p,d.date)){const it=selectedItem(p,d,c);if(!it)continue;const key=it.name.toLowerCase();if(!map.has(key))map.set(key,{key,name:it.name,grams:0,count:0,department:it.department,extra:false});const x=map.get(key);x.count++;if(it.grams!=null)x.grams+=it.grams}}for(const sp of p.supplements||[]){if(!p.startDate||!p.endDate)continue;const nd=datesBetween(p.startDate,p.endDate).length,key=sp.name.toLowerCase();if(!map.has(key))map.set(key,{key,name:sp.name,count:0,grams:null,department:sp.department||'Integratori',extra:false,unit:sp.unit});const x=map.get(key);x.count+=(sp.qtyPerDay||0)*nd}}return [...map.values()]}
-function qty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${x.grams} g`;return `${x.count} ${x.unit||'porzioni'}`}
-function renderShopping(){if(!householdId)return;let arr=collectShop().concat(extras.map(e=>({...e,key:'extra:'+e.id,extra:true})));const sort=$('shopSort')?.value||'dept';arr.sort((a,b)=>sort==='alpha'?a.name.localeCompare(b.name,'it'):(a.department||'Altro').localeCompare(b.department||'Altro','it')||a.name.localeCompare(b.name,'it'));const box=$('shoppingList');if(!box)return;box.innerHTML='';let last='';for(const x of arr){const cid=idSafe(x.key),done=!!checks[cid]?.checked;if(hideDone&&done)continue;if(sort==='dept'&&(x.department||'Altro')!==last){last=x.department||'Altro';const h=document.createElement('div');h.className='dept';h.textContent=last;box.appendChild(h)}const r=document.createElement('div');r.className='shoprow'+(done?' checked':'');r.innerHTML=`<input type="checkbox" ${done?'checked':''}><div><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted">${x.department||'Altro'}</div></div><div style="text-align:right"><b>${qty(x)}</b>${x.extra?'<div><button class="danger deleteExtra" style="margin-top:6px;padding:5px 8px;font-size:11px">Elimina</button></div>':''}</div>`;r.querySelector('input').onchange=async e=>setDoc(doc(db,'households',householdId,'checks',cid),{checked:e.target.checked,key:x.key,updatedAt:Date.now()});if(x.extra){r.querySelector('.deleteExtra').onclick=async()=>{if(!confirm(`Eliminare "${x.name}" dagli EXTRA?`))return;await deleteDoc(doc(db,'households',householdId,'extras',x.id));try{await deleteDoc(doc(db,'households',householdId,'checks',cid))}catch{}}}box.appendChild(r)}$('shopInfo').textContent=`${arr.length} voci · somma dei due profili`}
-$('shopSort').onchange=renderShopping;$('hideChecked').onclick=()=>{hideDone=!hideDone;$('hideChecked').textContent='Nascondi presi: '+(hideDone?'SÌ':'NO');renderShopping()};$('addExtra').onclick=()=>$('modal').classList.remove('hidden');$('cancelExtra').onclick=()=>$('modal').classList.add('hidden');$('saveExtra').onclick=async()=>{const name=$('extraName').value.trim();if(!name)return;const ref=doc(collection(db,'households',householdId,'extras'));await setDoc(ref,{name,qty:Number($('extraQty').value||1),unit:$('extraUnit').value.trim()||'pz',department:$('extraDept').value,createdAt:Date.now()});$('modal').classList.add('hidden');$('extraName').value=''};$('shareShop').onclick=async()=>{const arr=collectShop().concat(extras.map(e=>({...e,key:'extra:'+e.id,extra:true})));const text=['LISTA DELLA SPESA','',...arr.map(x=>`• ${x.name}: ${qty(x)}${x.extra?' [EXTRA]':''}`)].join('\n');if(navigator.share)try{await navigator.share({title:'Spesa PianoCasa',text})}catch{}else{await navigator.clipboard.writeText(text);alert('Lista copiata')}};
+function normalizeName(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
+function planBounds(){
+  const ps=Object.values(profiles).filter(p=>p.startDate&&p.endDate);
+  if(!ps.length)return{from:isoToday(),to:addDays(isoToday(),13)};
+  return{from:ps.map(p=>p.startDate).sort()[0],to:ps.map(p=>p.endDate).sort().at(-1)}
+}
+function shopRange(){
+  const b=planBounds();let from=b.from,to=b.to;
+  if(shopRangeMode==='week1'){from=b.from;to=addDays(from,6)}
+  else if(shopRangeMode==='week2'){from=addDays(b.from,7);to=addDays(from,6)}
+  else if(shopRangeMode==='custom'){from=shopCustomStart||b.from;to=shopCustomEnd||b.to}
+  if(from<b.from)from=b.from;if(to>b.to)to=b.to;if(from>to)to=from;
+  return{from,to}
+}
+function shopRangeLabel(r=shopRange()){return `${fmt(r.from,true)} → ${fmt(r.to,true)}`}
+function dateInProfileRange(p,date,r){return date>=r.from&&date<=r.to&&(!p.startDate||date>=p.startDate)&&(!p.endDate||date<=p.endDate)}
+function intersectionDays(p,r){if(!p.startDate||!p.endDate)return 0;const a=p.startDate>r.from?p.startDate:r.from,b=p.endDate<r.to?p.endDate:r.to;return datesBetween(a,b).length}
+function syncShopPeriodControls(){
+  for(const id of ['shopPeriod','portionPeriod'])if($(id))$(id).value=shopRangeMode;
+  for(const prefix of ['shop','portion']){
+    const wrap=$(prefix+'CustomRange');if(wrap)wrap.classList.toggle('hidden',shopRangeMode!=='custom');
+    const s=$(prefix+'CustomStart'),e=$(prefix+'CustomEnd');if(s)s.value=shopCustomStart||planBounds().from;if(e)e.value=shopCustomEnd||planBounds().to;
+  }
+}
+function setShopPeriod(mode,from=null,to=null){shopRangeMode=mode;if(from)shopCustomStart=from;if(to)shopCustomEnd=to;syncShopPeriodControls();renderShopping();renderPortions()}
+function collectShop(range=shopRange()){
+  const map=new Map();
+  for(const p of Object.values(profiles)){
+    for(const d of days.filter(x=>x.profileId===p.id&&dateInProfileRange(p,x.date,range))){
+      for(const c of activeCats(p,d.date)){
+        const it=selectedItem(p,d,c);if(!it)continue;
+        const key=normalizeName(it.name);
+        if(!map.has(key))map.set(key,{key,legacyKey:it.name.toLowerCase(),name:it.name,grams:0,count:0,department:it.department||'Altro',extra:false,categoryLabels:[],sourceDepartments:[]});
+        const x=map.get(key);x.count++;if(it.grams!=null)x.grams+=Number(it.grams);
+        if(c.label&&!x.categoryLabels.includes(c.label))x.categoryLabels.push(c.label);
+        if(it.department&&!x.sourceDepartments.includes(it.department))x.sourceDepartments.push(it.department)
+      }
+    }
+    const nd=intersectionDays(p,range);
+    for(const sp of p.supplements||[]){
+      if(!nd)continue;const key=normalizeName(sp.name);
+      if(!map.has(key))map.set(key,{key,legacyKey:sp.name.toLowerCase(),name:sp.name,count:0,grams:null,department:sp.department||'Integratori',extra:false,unit:sp.unit,categoryLabels:[],sourceDepartments:[sp.department||'Integratori']});
+      map.get(key).count+=(sp.qtyPerDay||0)*nd
+    }
+  }
+  return [...map.values()]
+}
+function allShopItems(range=shopRange()){return collectShop(range).concat(extras.map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
+function qty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
+const PIECE_WEIGHTS={
+  'albicocche':[35,50],'arance':[160,220],'banana':[100,140],'carciofi':[180,250],'carote':[80,120],'cavolfiore':[700,1200],'cetrioli':[200,300],
+  'cipolle':[120,180],'clementine':[70,100],'fichi':[40,60],"fichi d india":[90,130],'finocchi':[250,350],'mandaranci':[100,150],'mandarini':[80,110],
+  'mela':[130,180],'melagrana':[250,400],'melanzane':[250,400],'melone':[900,1500],'nespole':[30,50],'peperoni':[180,280],'pera':[150,220],
+  'pesca':[160,220],'pomodori da insalata':[120,200],'pompelmo':[250,400],'pompelmo rosa':[250,400],'porri':[200,350],'prugne':[50,80],
+  'broccolo a testa':[400,700],'cavolo broccolo verde':[400,700],'zucchine':[150,250],'uova intere':[55,65],"albume d uovo":null
+};
+function approxPieces(x){
+  if(!x||x.extra||!x.grams||x.grams<=0)return'';const n=normalizeName(x.name);
+  if(/cilieg|datter|mirtill|lamp|more|ribes|uva|amarene|asparag|insalata|lattuga|spinaci|rucola|bieta|fagiolini|funghi|cicoria|valeriana|crescione/.test(n))return'';
+  let w=null;for(const [k,v] of Object.entries(PIECE_WEIGHTS))if(v&&n===k){w=v;break}if(!w)return'';
+  let lo=Math.max(1,Math.round(x.grams/w[1])),hi=Math.max(lo,Math.round(x.grams/w[0]));
+  return lo===hi?`≈ ${lo} pz`:`≈ ${lo}–${hi} pz`
+}
+const GENERAL_DEPTS=['Frutta e verdura','Carne','Pesce','Latticini e uova','Salumi','Cereali e pane','Legumi','Condimenti','Frutta secca e snack','Integratori','Bevande','Casa e pulizia','Igiene','Altro'];
+const TOSANO_AISLES=[
+  ['0A','Frutta'],['0B','Verdura'],['0C','Carne fresca'],['0D','Carne congelata'],['0E','Pesce fresco'],['0F','Pesce congelato'],
+  ['1','Acque · frutta secca'],['2','Bibite · energy drink · tè'],['3','Bibite · succhi'],['4','Birre'],['5','Spumanti · aperitivi'],['6','Vini'],['7','Liquori'],
+  ['8','Confetture · caffè · tisane'],['9','Patatine · salatini · gallette'],['10','Merende · biscotti'],['11','Dolci · cereali · miele'],['12','Pane · crackers · grissini'],
+  ['13','Pasta'],['14','Riso · legumi · scatolame'],['15','Olio · tonno · acciughe'],['16','Farine · passate · sughi'],['17','Animali'],['18','Casa · giardinaggio'],
+  ['19','Detergenti casa'],['20','Detersivi piatti e bucato'],['21','Carta casa'],['22','Tovaglioli · pellicole · plastiche'],['23','Igiene persona'],['24','Parafarmacia · corpo'],
+  ['25','Latte speciale · maionese · ketchup'],['26','Uova · salse · panna'],['27','Latticini · fresco'],['28','Salumi · pasta fresca · gelati']
+];
+const TOSANO_RANK=Object.fromEntries(TOSANO_AISLES.map((x,i)=>[x[0],i]));
+function aisleLabel(code){const a=TOSANO_AISLES.find(x=>x[0]===code);return a?`${a[0]} · ${a[1]}`:'❓ Reparto sconosciuto'}
+function mappingDocId(name){return idSafe(`${TOSANO_STORE_ID}|${normalizeName(name)}`)}
+function manualAisle(name){return storeMappings[mappingDocId(name)]?.aisle||null}
+function hasAny(s,words){return words.some(w=>s.includes(w))}
+function inferTosanoAisle(x){
+  const manual=manualAisle(x.name);if(manual)return manual;
+  const n=normalizeName(x.name),dep=normalizeName(x.department),cats=normalizeName((x.categoryLabels||[]).join(' ')),all=`${n} ${dep} ${cats}`;
+  const frozen=hasAny(n,['surgel','congel','frozen']);
+  if(hasAny(n,['birra','radler']))return'4';
+  if(hasAny(n,['spumante','prosecco','champagne','aperitivo','vino liquoroso']))return'5';
+  if((n.includes('vino')||n.includes('magnum'))&&!n.includes('aceto'))return'6';
+  if(hasAny(n,['vodka','gin','grappa','amaro','liquore','sciroppo']))return'7';
+  if(hasAny(n,['carta igienica','tovaglia']))return'21';
+  if(hasAny(n,['tovagliol','pellicol','plastica','piatti monouso','bicchieri monouso','picnic','incontinenza']))return'22';
+  if(hasAny(n,['detersivo piatti','detersivo bucato','detersivi piatti','detersivi bucato']))return'20';
+  if(hasAny(n,['ammorbidente','candeggina','smacchiatore','sgrassatore','detergente casa','wc','anticalcare']))return'19';
+  if(hasAny(n,['dentifric','spazzolin','deodorant','shampoo','balsamo capelli','crema viso','crema corpo','depilator']))return'23';
+  if(hasAny(n,['fazzolett','sapone intimo','cerott','docciaschiuma','bagnoschiuma','struccant','spugna corpo','parafarmacia']))return'24';
+  if(hasAny(n,['lettiera','cibo gatto','cibo cane','crocchette gatto','crocchette cane','guinzaglio','insetticida']))return'17';
+  if(hasAny(n,['scopa','tappeto','guanti','sacchi','profumo casa','lumini','cucito','giardinaggio']))return'18';
+  if(hasAny(n,['maionese','ketchup','latte infanzia','omogeneizzato']))return'25';
+  if(hasAny(n,['panna','latte condensato','cotechino','sottolio','sott oli','salsa']))return'26';
+  if(hasAny(n,['sottaceto','sott aceto','pasta fresca','gelato']))return'28';
+  if(hasAny(n,['marmellata','confettura','cioccolato spalmabile','caffe','capsule caffe','tisana']))return'8';
+  if(hasAny(n,['patatine','salatini','gallette','preparato per dolci','senza glutine']))return'9';
+  if(hasAny(n,['biscott','merenda']))return'10';
+  if(hasAny(n,['cioccolat','caramell','miele','zucchero','snack','muesli','cereali','fiocchi d avena','avena','flakes','barretta']))return'11';
+  if(hasAny(n,['fette biscottate','cracker','grissin','tarall','pane']))return'12';
+  if(n.includes('pasta')&&!n.includes('pasta fresca')&&!n.includes('pasta integrale al pomodoro fresco'))return'13';
+  if(hasAny(n,['riso','quinoa','lenticch','ceci','fagioli','piselli secchi','legumi','aduki','borlotti','cannellini','dado','piatto pronto','etnico']))return'14';
+  if(hasAny(n,['olio','tonno sott olio','tonno in scatola','carne in scatola','acciugh']))return'15';
+  if(hasAny(n,['farina','polenta','passata','sugo','pesto']))return'16';
+  if(hasAny(n,['acqua naturale','acqua frizzante'])||n==='acqua'||n==='acque')return'1';
+  if(hasAny(n,['energy drink','bicarbonato','te freddo','the freddo','ice tea']))return'2';
+  if(hasAny(n,['succo','aloe','coca cola','coca-cola','aranciata','bibita']))return'3';
+  if(dep.includes('integratori'))return'24';
+  if(dep.includes('frutta secca')||hasAny(n,['mandorle','noci','nocciole','pistacchi','anacardi','semi']))return'1';
+  if(dep.includes('carne'))return frozen?'0D':'0C';
+  if(dep.includes('pesce')){
+    if(hasAny(n,['sott olio','in scatola','acciugh']))return'15';
+    return frozen?'0F':'0E'
+  }
+  if(dep.includes('salumi'))return'28';
+  if(dep.includes('latticini')||dep.includes('uova')){if(n.includes('uova')||n.includes('albume'))return'26';return'27'}
+  if(cats.includes('frutta')&&!cats.includes('frutta secca'))return'0A';
+  if(cats.includes('verdura'))return'0B';
+  if(dep.includes('frutta e verdura')){
+    const FRUIT=['albicoc','amarene','arance','banana','cilieg','clement','cocomero','fichi','lampon','mandar','mela','melagrana','melone','mirtill','more','nespole','pera','pesca','pompelmo','prugne','ribes','uva','frutta fresca'];
+    if(hasAny(n,FRUIT))return'0A';return'0B'
+  }
+  if(dep.includes('legumi')||cats.includes('legume'))return'14';
+  if(dep.includes('cereali')||dep.includes('pane'))return'12';
+  if(dep.includes('condimenti'))return'16';
+  if(dep.includes('bevande'))return'3';
+  if(dep.includes('igiene'))return'24';
+  if(dep.includes('casa'))return'18';
+  return null
+}
+function generalRank(dep){const i=GENERAL_DEPTS.indexOf(dep||'Altro');return i<0?999:i}
+function shopSortMode(){return alphaPeek?'alpha':($('shopSort')?.value||'dept')}
+function shopGroup(x,mode){if(mode==='alpha')return (x.name.trim()[0]||'#').toUpperCase();if(mode==='tosano')return inferTosanoAisle(x)||'?';return x.department||'Altro'}
+function compareShop(a,b,mode){
+  if(mode==='alpha')return a.name.localeCompare(b.name,'it',{sensitivity:'base'});
+  if(mode==='tosano'){const aa=inferTosanoAisle(a),bb=inferTosanoAisle(b),ra=aa==null?999:(TOSANO_RANK[aa]??998),rb=bb==null?999:(TOSANO_RANK[bb]??998);return ra-rb||a.name.localeCompare(b.name,'it')}
+  return generalRank(a.department)-generalRank(b.department)||(a.department||'').localeCompare(b.department||'','it')||a.name.localeCompare(b.name,'it')
+}
+function rangeCheckId(x,r=shopRange()){return idSafe(`v9|${r.from}|${r.to}|${x.key}`)}
+function itemChecked(x,r=shopRange()){
+  const specific=checks[rangeCheckId(x,r)];if(specific)return!!specific.checked;
+  const b=planBounds();if(r.from===b.from&&r.to===b.to)return!!(checks[idSafe(x.legacyKey||x.key)]?.checked||checks[idSafe(x.key)]?.checked);
+  return false
+}
+function shopContainer(){return shoppingModeOpen?$('shopModeOverlay'):$('shoppingList')}
+function currentShopScroll(){return shoppingModeOpen?$('shopModeOverlay').scrollTop:window.scrollY}
+function restoreShopScroll(v){requestAnimationFrame(()=>setTimeout(()=>{if(shoppingModeOpen)$('shopModeOverlay').scrollTop=v;else window.scrollTo({top:v,behavior:'auto'})},30))}
+function checkShopItem(x,checked){
+  const r=shopRange(),cid=rangeCheckId(x,r),peek=alphaPeek;
+  checks[cid]={checked,key:x.key,updatedAt:Date.now()};
+  if(peek)alphaPeek=null;
+  renderShopping();if(peek)restoreShopScroll(peek.scrollPos);
+  setDoc(doc(db,'households',householdId,'checks',cid),{checked,key:x.key,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()});
+}
+function shopMeta(x,mode){
+  if(mode==='tosano'){
+    const a=inferTosanoAisle(x);return a?`Iper Tosano · ${aisleLabel(a)}`:'Iper Tosano · reparto da assegnare'
+  }
+  return x.department||'Altro'
+}
+function addShopGroupHeader(box,group,mode,fullscreen){
+  const h=document.createElement('div');h.className='dept shopGroupHeader'+(fullscreen?' shopGroupBig':'');h.dataset.group=group;
+  h.dataset.letterHeader=mode==='alpha'?group:'';
+  if(mode==='tosano')h.textContent=group==='?'?'❓ Reparto sconosciuto':`Reparto ${aisleLabel(group)}`;
+  else if(mode==='alpha')h.textContent=group;else h.textContent=group;
+  box.appendChild(h)
+}
+function renderShopList(box,{fullscreen=false}={}){
+  if(!box)return;const r=shopRange(),mode=shopSortMode();let arr=allShopItems(r).sort((a,b)=>compareShop(a,b,mode));
+  box.innerHTML='';
+  if(alphaPeek){const bar=document.createElement('div');bar.className='alphaPeekBar';bar.innerHTML=`<span>Ricerca rapida A–Z</span><button>Torna a ${$('shopSort')?.selectedOptions?.[0]?.textContent||'lista'}</button>`;bar.querySelector('button').onclick=()=>{const p=alphaPeek;alphaPeek=null;renderShopping();restoreShopScroll(p.scrollPos)};box.appendChild(bar)}
+  let last='';for(const x of arr){const done=itemChecked(x,r);if(hideDone&&done)continue;const group=shopGroup(x,mode);if(group!==last){last=group;addShopGroupHeader(box,group,mode,fullscreen)}
+    const row=document.createElement('div');row.className='shoprow'+(done?' checked':'')+(fullscreen?' shoprowMode':'');row.dataset.itemKey=x.key;
+    const pieces=approxPieces(x),aisle=inferTosanoAisle(x),manual=!!manualAisle(x.name);
+    row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
+    row.querySelector('input').onchange=e=>checkShopItem(x,e.target.checked);
+    row.querySelector('.aisleEdit')?.addEventListener('click',()=>openAisleModal(x));
+    row.querySelector('.deleteExtra')?.addEventListener('click',async()=>{if(!confirm(`Eliminare "${x.name}" dagli EXTRA?`))return;await deleteDoc(doc(db,'households',householdId,'extras',x.id))});
+    box.appendChild(row)
+  }
+  if(!arr.length)box.innerHTML='<div class="emptyHistory">Nessun prodotto nel periodo selezionato.</div>'
+}
+function renderShopping(){
+  if(!householdId)return;syncShopPeriodControls();const r=shopRange(),arr=allShopItems(r);
+  renderShopList($('shoppingList'));
+  if($('shopInfo'))$('shopInfo').textContent=`${arr.length} voci · ${shopRangeLabel(r)}`;
+  if(shoppingModeOpen){renderShopList($('shopModeList'),{fullscreen:true});$('shopModeInfo').textContent=`${$('shopSort').selectedOptions[0].textContent} · ${shopRangeLabel(r)}`;$('shopModeRemaining').textContent=`${arr.filter(x=>!itemChecked(x,r)).length} da prendere`}
+  renderAlphaIndex()
+}
+function openAisleModal(x){
+  const sel=$('aisleSelect');sel.innerHTML='<option value="AUTO">Automatico</option>'+TOSANO_AISLES.map(a=>`<option value="${a[0]}">${a[0]} · ${a[1]}</option>`).join('');
+  sel.value=manualAisle(x.name)||'AUTO';$('aisleItemName').textContent=x.name;$('aisleModal').dataset.itemName=x.name;$('aisleModal').classList.remove('hidden')
+}
+$('cancelAisle')?.addEventListener('click',()=>$('aisleModal').classList.add('hidden'));
+$('saveAisle')?.addEventListener('click',async()=>{const name=$('aisleModal').dataset.itemName,v=$('aisleSelect').value,ref=doc(db,'households',householdId,'storeMappings',mappingDocId(name));if(v==='AUTO')await deleteDoc(ref);else await setDoc(ref,{storeId:TOSANO_STORE_ID,name,aisle:v,updatedAt:Date.now()});$('aisleModal').classList.add('hidden')});
+$('shopSort').onchange=()=>{alphaPeek=null;renderShopping()};
+$('hideChecked').onclick=()=>{hideDone=!hideDone;$('hideChecked').textContent='Nascondi presi: '+(hideDone?'SÌ':'NO');renderShopping()};
+$('addExtra').onclick=()=>$('modal').classList.remove('hidden');$('cancelExtra').onclick=()=>$('modal').classList.add('hidden');
+$('saveExtra').onclick=async()=>{const name=$('extraName').value.trim();if(!name)return;const ref=doc(collection(db,'households',householdId,'extras'));await setDoc(ref,{name,qty:Number($('extraQty').value||1),unit:$('extraUnit').value.trim()||'pz',department:$('extraDept').value,createdAt:Date.now()});$('modal').classList.add('hidden');$('extraName').value=''};
+$('shareShop').onclick=async()=>{const r=shopRange(),arr=allShopItems(r);const text=['LISTA DELLA SPESA',shopRangeLabel(r),'',...arr.map(x=>`• ${x.name}: ${qty(x)}${approxPieces(x)?' · '+approxPieces(x):''}${x.extra?' [EXTRA]':''}`)].join('\n');if(navigator.share)try{await navigator.share({title:'Spesa PianoCasa',text})}catch{}else{await navigator.clipboard.writeText(text);alert('Lista copiata')}};
+for(const id of ['shopPeriod','portionPeriod'])$(id)?.addEventListener('change',e=>setShopPeriod(e.target.value));
+for(const prefix of ['shop','portion']){
+  $(prefix+'CustomStart')?.addEventListener('change',e=>{shopCustomStart=e.target.value;setShopPeriod('custom')});
+  $(prefix+'CustomEnd')?.addEventListener('change',e=>{shopCustomEnd=e.target.value;setShopPeriod('custom')});
+}
+$('startShopping')?.addEventListener('click',()=>{shoppingModeOpen=true;$('shopModeOverlay').classList.remove('hidden');document.body.classList.add('shoppingModeOpen');$('shopModeOverlay').scrollTop=0;renderShopping()});
+$('closeShopMode')?.addEventListener('click',()=>{shoppingModeOpen=false;alphaPeek=null;$('shopModeOverlay').classList.add('hidden');document.body.classList.remove('shoppingModeOpen');renderAlphaIndex()});
+$('nextShopGroup')?.addEventListener('click',()=>{
+  const ov=$('shopModeOverlay'),heads=[...$('shopModeList').querySelectorAll('.shopGroupHeader')];if(!heads.length)return;
+  const top=ov.getBoundingClientRect().top+95,next=heads.find(h=>h.getBoundingClientRect().top>top+25);(next||heads[0]).scrollIntoView({behavior:'smooth',block:'start'})
+});
+const ALPHABET='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+function renderAlphaIndex(){const idx=$('alphaIndex');if(!idx)return;const visible=document.querySelector('#shopping.tab.active')||shoppingModeOpen;idx.classList.toggle('hidden',!visible);if(visible&&!idx.dataset.ready){idx.innerHTML=ALPHABET.map(l=>`<span data-letter="${l}">${l}</span>`).join('');idx.dataset.ready='1'}}
+function setupAlphaIndex(){const idx=$('alphaIndex');if(!idx||idx.dataset.handlers)return;idx.dataset.handlers='1';
+  const letterAt=e=>{const r=idx.getBoundingClientRect(),i=Math.max(0,Math.min(ALPHABET.length-1,Math.floor((e.clientY-r.top)/r.height*ALPHABET.length)));return ALPHABET[i]};
+  const go=e=>{const l=letterAt(e);$('alphaBubble').textContent=l;$('alphaBubble').classList.remove('hidden');jumpAlpha(l)};
+  idx.addEventListener('pointerdown',e=>{alphaPointerActive=true;alphaPointerId=e.pointerId;idx.setPointerCapture?.(e.pointerId);go(e);e.preventDefault()});
+  idx.addEventListener('pointermove',e=>{if(alphaPointerActive&&e.pointerId===alphaPointerId){go(e);e.preventDefault()}});
+  const end=e=>{if(e.pointerId!==alphaPointerId)return;alphaPointerActive=false;alphaPointerId=null;setTimeout(()=>$('alphaBubble').classList.add('hidden'),350)};
+  idx.addEventListener('pointerup',end);idx.addEventListener('pointercancel',end)
+}
+function jumpAlpha(letter){
+  const base=$('shopSort')?.value||'dept';if(base!=='alpha'&&!alphaPeek)alphaPeek={base,scrollPos:currentShopScroll()};renderShopping();
+  requestAnimationFrame(()=>setTimeout(()=>{const c=shoppingModeOpen?$('shopModeList'):$('shoppingList'),heads=[...c.querySelectorAll('[data-letter-header]')],h=heads.find(x=>x.dataset.letterHeader===letter)||heads.find(x=>x.dataset.letterHeader>letter);if(h)h.scrollIntoView({behavior:'auto',block:'start'})},20))
+}
+
+function portionableItem(it){const d=it.department||'';return ['Carne','Pesce','Salumi','Latticini e uova','Cereali e pane','Legumi','Frutta secca e snack'].includes(d)}
+function collectPortions(range=shopRange()){
+  const map=new Map();
+  for(const p of Object.values(profiles))for(const d of days.filter(x=>x.profileId===p.id&&dateInProfileRange(p,x.date,range)))for(const c of activeCats(p,d.date)){
+    const it=selectedItem(p,d,c);if(!it||it.grams==null||!portionableItem(it))continue;const key=normalizeName(it.name);
+    if(!map.has(key))map.set(key,{key,name:it.name,total:0,department:it.department,profiles:{}});const x=map.get(key);x.total+=Number(it.grams);
+    if(!x.profiles[p.id])x.profiles[p.id]={name:p.displayName,total:0,sizes:{}};const pp=x.profiles[p.id];pp.total+=Number(it.grams);pp.sizes[it.grams]=(pp.sizes[it.grams]||0)+1
+  }
+  return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'it'))
+}
+function portionCheckId(range,itemKey,pid,grams){return idSafe(`portion|${range.from}|${range.to}|${itemKey}|${pid}|${grams}`)}
+function renderPortions(){
+  const box=$('portionList');if(!box||!householdId)return;syncShopPeriodControls();const r=shopRange(),arr=collectPortions(r),shopMap=Object.fromEntries(allShopItems(r).map(x=>[x.key,x]));
+  $('portionInfo').textContent=`${arr.length} alimenti · ${shopRangeLabel(r)}`;box.innerHTML='';
+  if(!arr.length){box.innerHTML='<div class="emptyHistory">Completa i menu del periodo per vedere le porzioni da preparare.</div>';return}
+  for(const x of arr){const bought=shopMap[x.key]?itemChecked(shopMap[x.key],r):false,card=document.createElement('section');card.className='portionCard';
+    const groups=[];let totalGroups=0,doneGroups=0;
+    for(const [pid,pp] of Object.entries(x.profiles))for(const [g,count] of Object.entries(pp.sizes)){const cid=portionCheckId(r,x.key,pid,g),done=!!portionChecks[cid]?.checked;totalGroups++;if(done)doneGroups++;groups.push({pid,pp,g:Number(g),count,cid,done})}
+    card.innerHTML=`<div class="portionHead"><div><h3>${x.name}</h3><div class="muted">Totale ${x.total>=1000?(x.total/1000).toLocaleString('it-IT',{maximumFractionDigits:2})+' kg':Math.round(x.total)+' g'}</div></div><div class="portionStatus ${bought?'bought':'waiting'}">${bought?'✓ Acquistato':'Da acquistare'}</div></div><div class="portionProgress"><div style="width:${totalGroups?doneGroups/totalGroups*100:0}%"></div></div>`;
+    for(const [pid,pp] of Object.entries(x.profiles)){
+      const sec=document.createElement('div');sec.className='portionPerson';sec.innerHTML=`<div class="portionPersonHead"><b>${pp.name}</b><span>${Math.round(pp.total)} g</span></div>`;
+      for(const g of groups.filter(z=>z.pid===pid).sort((a,b)=>a.g-b.g)){
+        const row=document.createElement('label');row.className='portionRow'+(g.done?' done':'');row.innerHTML=`<input type="checkbox" ${g.done?'checked':''}><span><b>${g.g} g</b> × ${g.count} ${g.count===1?'porzione':'porzioni'}</span>`;
+        row.querySelector('input').onchange=e=>{portionChecks[g.cid]={checked:e.target.checked,updatedAt:Date.now()};renderPortions();setDoc(doc(db,'households',householdId,'portionChecks',g.cid),{checked:e.target.checked,itemKey:x.key,profileId:pid,grams:g.g,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()})};sec.appendChild(row)
+      }
+      card.appendChild(sec)
+    }
+    box.appendChild(card)
+  }
+}
 
 
 function sanitizeSelectionsForDate(p,date,selections={}){

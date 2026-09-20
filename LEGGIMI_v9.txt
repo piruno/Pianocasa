@@ -1,0 +1,49 @@
+PIANOCASA v9 — SPESA INTELLIGENTE + PORZIONI
+
+Sostituisci su GitHub:
+- app.js
+- index.html
+- style.css
+- sw.js
+
+NOVITÀ PRINCIPALI
+
+1. PORZIONI
+- Nuova scheda accanto a Spesa.
+- Raggruppa le grammature per alimento, Vincenzo/Anna e dimensione della porzione.
+- Esempio: Vincenzo 150 g × 2, 200 g × 2.
+- Nessun dettaglio giorno/pasto.
+- Spunte sincronizzate sui due telefoni.
+- Mostra se l'alimento risulta già acquistato nella lista spesa.
+
+2. PERIODO SPESA/PORZIONI
+- Settimana 1, Settimana 2, tutto il periodo oppure intervallo personalizzato.
+- Spesa e Porzioni usano sempre lo stesso intervallo.
+
+3. IPER TOSANO PRADAMANO
+Ordine fisico:
+0A Frutta, 0B Verdura, 0C Carne fresca, 0D Carne congelata, 0E Pesce fresco, 0F Pesce congelato, poi reparti 1–28.
+- Tutti i reparti fotografati sono inclusi.
+- Il sistema assegna localmente i prodotti con regole e sinonimi, senza servizi AI a pagamento.
+- Gli elementi incerti finiscono in “Reparto sconosciuto”.
+- Puoi assegnare/correggere un reparto e PianoCasa lo ricorda nel cloud per quel supermercato.
+
+4. INDICE A–Z STILE RUBRICA
+- Sempre disponibile nella Spesa.
+- Se stai ordinando per reparti, trascinando una lettera apre temporaneamente la vista A–Z.
+- Dopo aver spuntato il prodotto torna automaticamente all'ordinamento precedente.
+- Se non compri nulla, c'è il pulsante per tornare subito ai reparti.
+
+5. MODALITÀ “INIZIA SPESA”
+- Funziona con A–Z, reparti generali oppure Iper Tosano.
+- Interfaccia a schermo intero, checkbox grandi e pulsante “Reparto successivo”.
+- L'indice A–Z resta disponibile anche qui.
+
+6. PEZZI APPROSSIMATIVI
+- Per frutta/verdura e uova dove ha senso mostra anche ≈ pezzi oltre a g/kg.
+- Non viene mostrata una conversione quando sarebbe poco utile o troppo variabile.
+
+NOTE
+- Gli EXTRA vengono analizzati dallo stesso motore locale per assegnare il reparto Iper Tosano.
+- Nessun costo ricorrente e nessuna API AI esterna.
+- Le vecchie spunte della lista completa vengono mantenute come fallback; le nuove spunte per settimana/intervallo sono separate.
