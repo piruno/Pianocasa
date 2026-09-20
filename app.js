@@ -6,7 +6,7 @@ const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_'
 let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
-let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false;
+let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaResultLetter=null,alphaReturnScroll=0;
 const TOSANO_STORE_ID='iper-tosano-pradamano';
 
 if(badConfig){
@@ -487,7 +487,8 @@ function renderShopping(){
   renderShopList($('shoppingList'));
   if($('shopInfo'))$('shopInfo').textContent=`${arr.length} voci · ${shopRangeLabel(r)}`;
   if(shoppingModeOpen){renderShopList($('shopModeList'),{fullscreen:true});$('shopModeInfo').textContent=`${$('shopSort').selectedOptions[0].textContent} · ${shopRangeLabel(r)}`;$('shopModeRemaining').textContent=`${arr.filter(x=>!itemChecked(x,r)).length} da prendere`}
-  renderAlphaIndex()
+  renderAlphaIndex();
+  if(alphaResultLetter&&!$('alphaResultOverlay')?.classList.contains('hidden'))renderAlphaResult()
 }
 function openAisleModal(x){
   const sel=$('aisleSelect');sel.innerHTML='<option value="AUTO">Automatico</option>'+TOSANO_AISLES.map(a=>`<option value="${a[0]}">${a[0]} · ${a[1]}</option>`).join('');
@@ -534,65 +535,105 @@ function refreshAlphaPicker(){
     return `<button type="button" data-letter="${l}" aria-label="${n?`${l}, ${n} prodotti`:`${l}, nessun prodotto`}"><span>${l}</span><small>${n}</small></button>`
   }).join('')
 }
+
 function setupAlphaIndex(){
   const btn=$('alphaQuickBtn'),picker=$('alphaPicker'),grid=$('alphaGrid'),close=$('closeAlphaPicker');
-  if(!btn||!picker||!grid||btn.dataset.ready)return;btn.dataset.ready='1';
-  const shut=()=>picker.classList.add('hidden');
-  btn.onclick=()=>{
+  const result=$('alphaResultOverlay'),resultClose=$('closeAlphaResult'),change=$('changeAlphaLetter');
+  const prev=$('alphaPrevLetter'),next=$('alphaNextLetter');
+  if(!btn||!picker||!grid||!result||btn.dataset.ready)return;
+  btn.dataset.ready='1';
+
+  const openPicker=()=>{
     refreshAlphaPicker();
     picker.classList.remove('hidden');
-    requestAnimationFrame(()=>grid.querySelector('button:not(:disabled)')?.focus({preventScroll:true}))
   };
-  close.onclick=shut;
-  picker.addEventListener('click',e=>{if(e.target===picker)shut()});
+  const closePicker=()=>picker.classList.add('hidden');
+
+  btn.onclick=openPicker;
+  close.onclick=closePicker;
+  picker.addEventListener('click',e=>{if(e.target===picker)closePicker()});
+
   grid.addEventListener('click',e=>{
     const b=e.target.closest('[data-letter]');
     if(!b)return;
-    const l=b.dataset.letter;shut();jumpAlpha(l)
-  })
-}
-function scrollToExactAlphaHeader(letter){
-  const c=shoppingModeOpen?$('shopModeList'):$('shoppingList');
-  if(!c)return false;
-  const target=[...c.querySelectorAll('[data-letter-header]')].find(x=>x.dataset.letterHeader===letter);
-  if(!target)return false;
+    closePicker();
+    openAlphaResult(b.dataset.letter);
+  });
 
-  if(shoppingModeOpen){
-    const scroller=$('shopModeOverlay');
-    const topBar=scroller.querySelector('.shopModeTop');
-    const offset=(topBar?.offsetHeight||86)+8;
-    const srect=scroller.getBoundingClientRect(),trect=target.getBoundingClientRect();
-    const y=Math.max(0,scroller.scrollTop+(trect.top-srect.top)-offset);
-    scroller.scrollTo({top:y,behavior:'auto'})
-  }else{
-    const nav=document.querySelector('.tabs');
-    const desired=(nav?.getBoundingClientRect().bottom||0)+8;
-    const y=Math.max(0,window.scrollY+target.getBoundingClientRect().top-desired);
-    window.scrollTo({top:y,behavior:'auto'})
-  }
-  target.classList.add('alphaTargetFlash');
-  setTimeout(()=>target.classList.remove('alphaTargetFlash'),650);
-  return true
+  resultClose.onclick=closeAlphaResult;
+  change.onclick=()=>{
+    result.classList.add('hidden');
+    openPicker();
+  };
+  prev.onclick=()=>stepAlphaResult(-1);
+  next.onclick=()=>stepAlphaResult(1);
 }
-function jumpAlpha(letter){
+function stepAlphaResult(delta){
+  const i=ALPHABET.indexOf(alphaResultLetter);
+  if(i<0)return;
+  const next=ALPHABET[(i+delta+ALPHABET.length)%ALPHABET.length];
+  openAlphaResult(next,false);
+}
+function closeAlphaResult(){
+  $('alphaResultOverlay')?.classList.add('hidden');
+  alphaResultLetter=null;
+}
+function openAlphaResult(letter,captureScroll=true){
   if(!ALPHABET.includes(letter))return;
+  if(captureScroll)alphaReturnScroll=currentShopScroll();
+  alphaResultLetter=letter;
+  renderAlphaResult();
+  $('alphaResultOverlay')?.classList.remove('hidden');
+}
+function renderAlphaResult(){
+  const overlay=$('alphaResultOverlay'),list=$('alphaResultList');
+  if(!overlay||!list||!alphaResultLetter)return;
 
-  const base=$('shopSort')?.value||'dept';
-  if(base!=='alpha'&&!alphaPeek){
-    alphaPeek={base,scrollPos:currentShopScroll(),letter}
-  }else if(alphaPeek){
-    alphaPeek.letter=letter
+  const r=shopRange(),letter=alphaResultLetter;
+  let arr=allShopItems(r)
+    .filter(x=>initialLetter(x.name)===letter)
+    .sort((a,b)=>a.name.localeCompare(b.name,'it'));
+
+  if(hideDone)arr=arr.filter(x=>!itemChecked(x,r));
+
+  $('alphaResultLetter').textContent=letter;
+  $('alphaResultCount').textContent=arr.length===1?'1 prodotto':`${arr.length} prodotti`;
+  list.innerHTML='';
+
+  if(!arr.length){
+    const empty=document.createElement('div');
+    empty.className='alphaResultEmpty';
+    empty.innerHTML=`<div class="alphaResultBigLetter">${letter}</div><b>Nessun prodotto con la lettera ${letter}</b><span>Questa sezione è vuota per il periodo selezionato.</span>`;
+    list.appendChild(empty);
+    return;
   }
 
-  renderShopping();
+  const header=document.createElement('div');
+  header.className='alphaResultSectionTitle';
+  header.textContent=letter;
+  list.appendChild(header);
 
-  // Due frame: prima il DOM viene ricostruito, poi misuriamo la posizione reale.
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    const ok=scrollToExactAlphaHeader(letter);
-    if(!ok&&alphaPeek){
-      const p=alphaPeek;alphaPeek=null;renderShopping();restoreShopScroll(p.scrollPos)
-    }
-  }))
+  for(const x of arr){
+    const done=itemChecked(x,r);
+    const row=document.createElement('div');
+    row.className='shoprow alphaResultRow'+(done?' checked':'');
+    const pieces=approxPieces(x);
+    row.innerHTML=`<input type="checkbox" ${done?'checked':''}>
+      <div class="shopMain">
+        <b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}
+        <div class="muted shopMeta">${x.department||'Altro'}</div>
+      </div>
+      <div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}</div>`;
+
+    row.querySelector('input').onchange=e=>{
+      const checked=e.target.checked;
+      const returnPos=alphaReturnScroll;
+      closeAlphaResult();
+      checkShopItem(x,checked);
+      restoreShopScroll(returnPos);
+    };
+    list.appendChild(row);
+  }
 }
 
 function portionableItem(it){const d=it.department||'';return ['Carne','Pesce','Salumi','Latticini e uova','Cereali e pane','Legumi','Frutta secca e snack'].includes(d)}

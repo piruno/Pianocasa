@@ -1,0 +1,26 @@
+PIANOCASA v13 — RICERCA A–Z SENZA SCROLL
+
+Questa versione cambia completamente il funzionamento della ricerca per lettera.
+
+Prima:
+- PianoCasa ricostruiva la lista A–Z e tentava di spostare Safari alla posizione
+  della lettera con scroll programmato.
+- Su iPhone Safari questo poteva funzionare verso il basso ma fallire verso l'alto,
+  oppure restare sulla posizione precedente.
+
+Ora:
+- Tocchi A–Z.
+- Tocchi una lettera.
+- Si apre una VISTA DEDICATA a quella lettera, senza alcuno scroll automatico.
+- Se ci sono prodotti, vedi soltanto quelli.
+- Se non ce ne sono, appare chiaramente "Nessun prodotto con la lettera X".
+- Puoi passare alla lettera precedente/successiva con ‹ e ›.
+- "Cambia lettera" riapre la griglia A–Z.
+- Se spunti un prodotto, la vista si chiude e torni automaticamente alla lista
+  precedente (es. Iper Tosano) nella posizione da cui eri partito.
+
+Sostituisci su GitHub:
+- app.js
+- index.html
+- style.css
+- sw.js

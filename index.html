@@ -60,9 +60,26 @@
 <button id="alphaQuickBtn" class="alphaQuickBtn hidden" aria-label="Trova rapidamente per lettera">A–Z</button>
 <section id="alphaPicker" class="alphaPicker hidden" aria-modal="true" role="dialog">
   <div class="alphaPickerSheet">
-    <div class="alphaPickerHead"><div><b>Trova per lettera</b><div class="muted">Tocca una lettera: vai sempre esattamente a quella sezione. Se è vuota, PianoCasa te lo indica.</div></div><button id="closeAlphaPicker" class="ghost">✕</button></div>
+    <div class="alphaPickerHead"><div><b>Trova per lettera</b><div class="muted">Tocca una lettera: si apre una vista dedicata solo a quella lettera. Nessuno scroll automatico.</div></div><button id="closeAlphaPicker" class="ghost">✕</button></div>
     <div id="alphaGrid" class="alphaGrid"></div>
   </div>
+</section>
+
+<section id="alphaResultOverlay" class="alphaResultOverlay hidden" aria-modal="true" role="dialog">
+  <div class="alphaResultTop">
+    <button id="closeAlphaResult" class="ghost alphaResultClose">✕</button>
+    <div class="alphaResultTitle">
+      <span>RICERCA A–Z</span>
+      <div><b id="alphaResultLetter">A</b><small id="alphaResultCount">0 prodotti</small></div>
+    </div>
+    <button id="changeAlphaLetter">Cambia lettera</button>
+  </div>
+  <div class="alphaResultNav">
+    <button id="alphaPrevLetter" aria-label="Lettera precedente">‹</button>
+    <span>Scorri tra le lettere senza tornare alla lista</span>
+    <button id="alphaNextLetter" aria-label="Lettera successiva">›</button>
+  </div>
+  <div id="alphaResultList" class="alphaResultList"></div>
 </section>
 
 <section id="menuOverlay" class="menuOverlay hidden">

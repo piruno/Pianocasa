@@ -147,3 +147,49 @@ header{position:relative;top:auto;z-index:1}
   border-bottom:1px solid #edf2f0;
   background:#fbfcfc;
 }
+
+
+/* ===== v13: ricerca A–Z a vista dedicata, senza scroll automatico ===== */
+.alphaResultOverlay{
+  position:fixed;inset:0;z-index:190;background:#f4f7f6;
+  overflow:auto;padding-bottom:calc(24px + env(safe-area-inset-bottom));
+}
+.alphaResultTop{
+  position:sticky;top:0;z-index:20;
+  display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;
+  padding:calc(env(safe-area-inset-top) + 8px) 12px 10px;
+  background:rgba(244,247,246,.97);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line);
+}
+.alphaResultClose{font-size:18px;padding:8px 11px}
+.alphaResultTitle>span{display:block;font-size:9px;font-weight:950;letter-spacing:.13em;color:var(--accent)}
+.alphaResultTitle>div{display:flex;align-items:baseline;gap:10px;margin-top:1px}
+.alphaResultTitle b{font-size:30px;line-height:1}
+.alphaResultTitle small{font-size:11px;color:var(--muted);font-weight:800}
+.alphaResultTop>button:last-child{font-size:11px;padding:8px 10px}
+.alphaResultNav{
+  position:sticky;top:calc(env(safe-area-inset-top) + 65px);z-index:15;
+  display:grid;grid-template-columns:48px 1fr 48px;gap:8px;align-items:center;
+  padding:8px 12px;background:#edf4f1;border-bottom:1px solid #d6e3df;
+}
+.alphaResultNav button{font-size:24px;padding:5px}
+.alphaResultNav span{text-align:center;font-size:10px;color:#53635e;font-weight:800}
+.alphaResultList{padding:12px}
+.alphaResultSectionTitle{
+  position:sticky;top:calc(env(safe-area-inset-top) + 113px);z-index:10;
+  background:#dfece8;border:1px solid #c9ddd7;border-radius:12px;
+  padding:12px 14px;margin-bottom:6px;font-size:22px;font-weight:950;
+  box-shadow:0 3px 10px rgba(15,30,25,.07);
+}
+.alphaResultRow{background:#fff;border-radius:12px;padding-left:8px;padding-right:8px}
+.alphaResultEmpty{
+  min-height:55vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;gap:8px;padding:30px;color:#5f6f69;
+}
+.alphaResultEmpty b{font-size:18px;color:#263934}
+.alphaResultEmpty span{font-size:12px;max-width:280px}
+.alphaResultBigLetter{
+  width:92px;height:92px;border-radius:24px;display:grid;place-items:center;
+  background:#dfece8;color:#155f56;font-size:48px;font-weight:950;margin-bottom:8px;
+}
