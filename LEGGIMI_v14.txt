@@ -1,0 +1,21 @@
+PIANOCASA v14 — FIX CAMBIO LETTERA A–Z
+
+Correzione mirata del problema:
+- se eri in fondo alla vista di una lettera (es. Z)
+- poi sceglievi una lettera precedente (es. B)
+- Safari manteneva la vecchia posizione verticale dell'overlay,
+  quindi la B era sopra lo schermo e sembrava che non fosse cambiato nulla.
+
+Ora:
+- ogni volta che scegli una nuova lettera, la vista dedicata viene riportata
+  forzatamente all'inizio;
+- il reset viene eseguito prima e dopo il ridisegno del contenuto, per evitare
+  che WebKit/iPhone ripristini lo scroll precedente;
+- funziona sia andando avanti (B -> Z) sia tornando indietro (Z -> B);
+- "Cambia lettera" e chiusura della ricerca azzerano anch'essi la posizione.
+
+Sostituisci su GitHub:
+- app.js
+- sw.js
+
+index.html e style.css NON cambiano rispetto alla v13.

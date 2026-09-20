@@ -562,6 +562,7 @@ function setupAlphaIndex(){
 
   resultClose.onclick=closeAlphaResult;
   change.onclick=()=>{
+    result.scrollTop=0;
     result.classList.add('hidden');
     openPicker();
   };
@@ -575,15 +576,32 @@ function stepAlphaResult(delta){
   openAlphaResult(next,false);
 }
 function closeAlphaResult(){
-  $('alphaResultOverlay')?.classList.add('hidden');
+  const overlay=$('alphaResultOverlay');
+  if(overlay){overlay.scrollTop=0;overlay.classList.add('hidden')}
   alphaResultLetter=null;
 }
 function openAlphaResult(letter,captureScroll=true){
   if(!ALPHABET.includes(letter))return;
   if(captureScroll)alphaReturnScroll=currentShopScroll();
+
+  const overlay=$('alphaResultOverlay');
+  if(!overlay)return;
+
+  // IMPORTANT: ogni nuova lettera parte SEMPRE dall'inizio della vista dedicata.
+  // Safari/iPhone mantiene lo scrollTop dell'overlay precedente (es. Z -> B)
+  // se non lo azzeriamo esplicitamente.
+  overlay.scrollTop=0;
+
   alphaResultLetter=letter;
   renderAlphaResult();
-  $('alphaResultOverlay')?.classList.remove('hidden');
+  overlay.classList.remove('hidden');
+
+  // Secondo reset dopo il repaint: evita che WebKit ripristini la posizione
+  // precedente mentre il DOM della nuova lettera viene ricostruito.
+  requestAnimationFrame(()=>{
+    overlay.scrollTop=0;
+    requestAnimationFrame(()=>{ overlay.scrollTop=0; });
+  });
 }
 function renderAlphaResult(){
   const overlay=$('alphaResultOverlay'),list=$('alphaResultList');
