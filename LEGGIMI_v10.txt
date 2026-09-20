@@ -1,0 +1,29 @@
+PIANOCASA v10 — NAVIGAZIONE, RICERCA A–Z, SCELTE DEL PARTNER
+
+Sostituisci su GitHub:
+- app.js
+- index.html
+- style.css
+- sw.js
+
+NOVITÀ
+
+1) A–Z PIÙ PRATICO
+- Rimosso lo slider touch laterale.
+- Nuovo pulsante fisso A–Z.
+- Toccandolo si apre una griglia grande e statica con tutte le lettere.
+- La lettera scelta apre temporaneamente l'ordinamento alfabetico.
+- Se spunti il prodotto, PianoCasa torna automaticamente all'ordinamento precedente (reparti generali o Iper Tosano) e alla posizione precedente.
+- Resta disponibile anche il pulsante manuale "Torna a...".
+
+2) BARRA PRINCIPALE SEMPRE DISPONIBILE
+- Il logo PianoCasa e "Due diete, una spesa condivisa" scorrono via e liberano spazio.
+- La barra Oggi / Calendario / Storico / Spesa / Porzioni / Impostazioni resta fissa in alto durante lo scroll.
+
+3) SCELTE DI VINCENZO E ANNA VISIBILI A VICENDA
+- Nella pagina Oggi, se l'altro profilo ha già scelto un alimento nella stessa sezione, quell'alimento appare evidenziato in trasparenza con il nome dell'altro profilo e la sua grammatura.
+- Funziona in entrambe le direzioni: se sceglie prima Vincenzo lo vede Anna, se sceglie prima Anna lo vede Vincenzo.
+- La selezione dell'altro NON seleziona automaticamente la tua: resta solo un suggerimento visivo.
+- Se l'alimento scelto dall'altro non esiste tra le tue alternative, compare chiaramente "ALIMENTO NON IN COMUNE" con il nome dell'alimento.
+
+Tutto il resto della v9 resta invariato.

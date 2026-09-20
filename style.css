@@ -96,3 +96,28 @@
 .shopModeOverlay{position:fixed;inset:0;z-index:100;background:#f4f7f6;overflow:auto;padding-bottom:calc(92px + env(safe-area-inset-bottom))}.shopModeTop{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:rgba(244,247,246,.96);backdrop-filter:blur(12px);padding:calc(env(safe-area-inset-top) + 8px) 14px 10px;border-bottom:1px solid var(--line)}.shopModeTop h2{margin:0}.shopModeEyebrow{font-size:9px;font-weight:900;letter-spacing:.15em;color:var(--accent)}.shopModeList{padding:10px 28px 18px 12px}.shopModeBottom{position:fixed;left:0;right:0;bottom:0;z-index:25;background:rgba(244,247,246,.96);backdrop-filter:blur(12px);padding:10px 38px calc(10px + env(safe-area-inset-bottom)) 12px;border-top:1px solid var(--line)}.shopModeBottom button{width:100%;font-size:15px}.shopGroupBig{top:86px;font-size:18px;padding:12px}.shoprowMode{padding:15px 4px}.shoprowMode input[type=checkbox]{width:29px;height:29px}.shoprowMode .shopMain b{font-size:17px}.shoprowMode .shopQty b{font-size:17px}
 .portionCard{background:#fff;border:1px solid var(--line);border-radius:18px;margin:12px 0;padding:14px;box-shadow:0 4px 18px rgba(15,30,25,.045)}.portionHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.portionHead h3{margin:0 0 3px;font-size:19px}.portionStatus{font-size:10px;font-weight:900;border-radius:999px;padding:6px 8px;white-space:nowrap}.portionStatus.bought{background:#dcfce7;color:#166534}.portionStatus.waiting{background:#fff7ed;color:#9a3412}.portionProgress{height:5px;background:#e7eeeb;border-radius:99px;overflow:hidden;margin:10px 0}.portionProgress div{height:100%;background:#0f766e}.portionPerson{border:1px solid #e0e8e5;border-radius:13px;overflow:hidden;margin-top:10px}.portionPersonHead{display:flex;justify-content:space-between;background:#eef6f3;padding:9px 10px}.portionRow{display:flex;align-items:center;gap:10px;padding:11px 10px;border-top:1px solid #edf2f0}.portionRow input{width:22px;height:22px;accent-color:var(--accent)}.portionRow.done{opacity:.45;text-decoration:line-through}
 @media(max-width:560px){.tabs{grid-template-columns:repeat(6,1fr);gap:3px}.tabs button{font-size:9.3px;padding:9px 1px}.shopControls .row{align-items:flex-start}.shopControls select{max-width:185px}.alphaIndex{right:0;width:20px}.alphaIndex span{height:16px;line-height:16px;font-size:8.5px}.shopModeList{padding-right:25px}.shopGroupHeader{top:62px}}
+
+
+/* ===== PianoCasa v10: navigazione sticky, A-Z statico e scelte partner ===== */
+header{position:relative;top:auto;z-index:1}
+.tabs{position:sticky;top:env(safe-area-inset-top);z-index:45;background:rgba(244,247,246,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);padding:6px 0;margin-bottom:12px;border-bottom:1px solid rgba(219,229,225,.9);box-shadow:0 5px 13px rgba(15,30,25,.06)}
+.choiceHeader{top:calc(env(safe-area-inset-top) + 52px)}
+.alphaPeekBar{top:calc(env(safe-area-inset-top) + 52px)}
+
+/* Il vecchio indice touch laterale non viene più usato. */
+.alphaIndex,.alphaBubble{display:none!important}
+.alphaQuickBtn{position:fixed;right:8px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:135;width:48px;height:48px;padding:0;border-radius:16px;background:#173b34;color:#fff;box-shadow:0 7px 22px rgba(0,0,0,.2);font-size:12px;font-weight:950;letter-spacing:-.02em}
+.alphaPicker{position:fixed;inset:0;z-index:170;background:rgba(10,20,18,.38);display:flex;align-items:flex-end;justify-content:center;padding:14px}
+.alphaPickerSheet{width:min(520px,100%);background:#fff;border-radius:22px;padding:14px 14px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -8px 34px rgba(0,0,0,.22)}
+.alphaPickerHead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}.alphaPickerHead b{font-size:18px}.alphaPickerHead .muted{margin-top:3px;line-height:1.35}
+.alphaGrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.alphaGrid button{min-height:46px;font-size:17px;font-weight:900;background:#edf4f1;color:#164c43;border:1px solid #d5e2de}.alphaGrid button:active{background:#0f766e;color:#fff;transform:scale(.96)}
+.shoppingModeOpen .alphaQuickBtn{bottom:calc(92px + env(safe-area-inset-bottom))}
+
+.partnerNotice{display:flex;align-items:flex-start;gap:9px;margin:10px 10px 0;padding:10px 11px;border-radius:12px;background:rgba(100,116,139,.09);border:1px dashed rgba(100,116,139,.45);color:#475569}.partnerNotice b{display:block;font-size:12px}.partnerNotice small{display:block;margin-top:3px;font-size:9px;font-weight:850;letter-spacing:.04em}.partnerNotice.notCommon small{color:#9a3412}.partnerAvatar{font-size:17px;opacity:.7}
+.opt.partnerSelected:not(.selected){background:linear-gradient(135deg,rgba(226,232,240,.72),rgba(241,245,249,.86));border:2px dashed #64748b;opacity:.88}.opt.partnerSelected.selected{box-shadow:inset 0 0 0 1px var(--accent),0 0 0 2px rgba(100,116,139,.22)}
+.partnerPickBadge{display:block;margin-top:6px;padding:5px 7px;border-radius:8px;background:rgba(71,85,105,.11);color:#475569;font-size:9.5px;font-weight:900;line-height:1.25}
+
+@media(max-width:560px){
+  .tabs{top:env(safe-area-inset-top);padding:5px 0}.choiceHeader{top:calc(env(safe-area-inset-top) + 48px)}.alphaPeekBar{top:calc(env(safe-area-inset-top) + 48px)}
+  .alphaGrid{grid-template-columns:repeat(5,1fr);gap:7px}.alphaGrid button{min-height:48px;font-size:18px}.alphaQuickBtn{right:7px;width:50px;height:50px;border-radius:17px}
+}

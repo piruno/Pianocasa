@@ -6,7 +6,7 @@ const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_'
 let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
-let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaPointerActive=false,alphaPointerId=null;
+let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false;
 const TOSANO_STORE_ID='iper-tosano-pradamano';
 
 if(badConfig){
@@ -126,6 +126,22 @@ function missingTextByMeal(p,d){
     return miss.length?`<b>${m.label}</b>: ${miss.map(c=>c.label).join(', ')}`:'';
   }).filter(Boolean).join('<br>');
 }
+function partnerProfileFor(p){return Object.values(profiles).find(x=>x.id!==p.id)||null}
+function equivalentMeal(p,meal){return p.meals.find(m=>m.id===meal.id)||p.meals.find(m=>normalizeName(m.label)===normalizeName(meal.label))||null}
+function equivalentCategory(meal,c){
+  let pc=meal.categories.find(x=>x.id===c.id)||meal.categories.find(x=>normalizeName(x.label)===normalizeName(c.label));
+  if(pc)return pc;
+  const kind=categoryMeta(c).kind,cands=meal.categories.filter(x=>categoryMeta(x).kind===kind);
+  return kind!=='other'&&cands.length===1?cands[0]:null
+}
+function partnerChoiceFor(p,meal,c,date){
+  const partner=partnerProfileFor(p);if(!partner)return null;
+  const pm=equivalentMeal(partner,meal);if(!pm)return{partner,item:null,common:false};
+  const pc=equivalentCategory(pm,c);if(!pc)return{partner,item:null,common:false};
+  const pd=dayDoc(partner.id,date),item=selectedItem(partner,pd,pc);if(!item)return{partner,item:null,common:false};
+  const match=c.items.find(it=>normalizeName(it.name)===normalizeName(item.name));
+  return{partner,item,common:!!match,matchId:match?.id||null}
+}
 function renderToday(){
   const p=profiles[currentProfileId];if(!p)return;
   const d=dayDoc(p.id,currentDate),missing=missingCategories(p,d),total=totalKcal(p,d);
@@ -169,7 +185,7 @@ function renderToday(){
     }
 
     meal.categories.forEach((c,idx)=>{
-      const meta=categoryMeta(c),chosen=selectedItem(p,d,c),isOpen=!chosen||expandedCats.has(c.id);
+      const meta=categoryMeta(c),chosen=selectedItem(p,d,c),isOpen=!chosen||expandedCats.has(c.id),partnerPick=partnerChoiceFor(p,meal,c,currentDate);
       const box=document.createElement('div');
       box.className=`choiceStep ${chosen?'choiceComplete':'choiceMissing'} kind-${meta.kind}`;
       box.id='choice_'+c.id;
@@ -179,6 +195,7 @@ function renderToday(){
         <div class="choiceStatus ${chosen?'ok':'todo'}">${chosen?'✓ COMPLETA':'DA SCEGLIERE'}</div>
       </div>
       ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${chosen.grams!=null?' — '+chosen.grams+' g':''}</b><small>${chosen.kcal} kcal</small></div><button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button></div>`:''}
+      ${partnerPick?.item&&!partnerPick.common?`<div class="partnerNotice notCommon"><span class="partnerAvatar">👥</span><div><b>${partnerPick.partner.displayName} ha scelto ${partnerPick.item.name}${partnerPick.item.grams!=null?' — '+partnerPick.item.grams+' g':''}</b><small>ALIMENTO NON IN COMUNE: non compare tra le tue alternative.</small></div></div>`:''}
       <div class="options ${isOpen?'':'collapsed'}"></div>`;
       const opts=box.querySelector('.options');
 
@@ -193,8 +210,9 @@ function renderToday(){
       for(const it of sortedItems){
         const b=document.createElement('button');b.className='opt';
         const sel=d.selections?.[c.id]===it.id;if(sel)b.classList.add('selected');
+        const partnerSelected=!!(partnerPick?.common&&partnerPick.matchId===it.id);if(partnerSelected)b.classList.add('partnerSelected');
         const block=blockedReason(p,currentDate,c.id,it.id,d);b.disabled=!sel&&!!block;
-        b.innerHTML=`${it.name}${it.grams!=null?' — '+it.grams+' g':''}<small>${it.kcal} kcal</small>${block&&!sel?`<span class="limit">${block}</span>`:''}`;
+        b.innerHTML=`${it.name}${it.grams!=null?' — '+it.grams+' g':''}<small>${it.kcal} kcal</small>${partnerSelected?`<span class="partnerPickBadge">👥 ${partnerPick.partner.displayName} ha scelto questo${partnerPick.item.grams!=null?' · '+partnerPick.item.grams+' g':''}</span>`:''}${block&&!sel?`<span class="limit">${block}</span>`:''}`;
         b.onclick=async()=>{
           if(sel){expandedCats.delete(c.id);renderToday();return}
           const nd=structuredClone(dayDoc(p.id,currentDate));nd.selections||={};
@@ -452,18 +470,24 @@ $('nextShopGroup')?.addEventListener('click',()=>{
   const top=ov.getBoundingClientRect().top+95,next=heads.find(h=>h.getBoundingClientRect().top>top+25);(next||heads[0]).scrollIntoView({behavior:'smooth',block:'start'})
 });
 const ALPHABET='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-function renderAlphaIndex(){const idx=$('alphaIndex');if(!idx)return;const visible=document.querySelector('#shopping.tab.active')||shoppingModeOpen;idx.classList.toggle('hidden',!visible);if(visible&&!idx.dataset.ready){idx.innerHTML=ALPHABET.map(l=>`<span data-letter="${l}">${l}</span>`).join('');idx.dataset.ready='1'}}
-function setupAlphaIndex(){const idx=$('alphaIndex');if(!idx||idx.dataset.handlers)return;idx.dataset.handlers='1';
-  const letterAt=e=>{const r=idx.getBoundingClientRect(),i=Math.max(0,Math.min(ALPHABET.length-1,Math.floor((e.clientY-r.top)/r.height*ALPHABET.length)));return ALPHABET[i]};
-  const go=e=>{const l=letterAt(e);$('alphaBubble').textContent=l;$('alphaBubble').classList.remove('hidden');jumpAlpha(l)};
-  idx.addEventListener('pointerdown',e=>{alphaPointerActive=true;alphaPointerId=e.pointerId;idx.setPointerCapture?.(e.pointerId);go(e);e.preventDefault()});
-  idx.addEventListener('pointermove',e=>{if(alphaPointerActive&&e.pointerId===alphaPointerId){go(e);e.preventDefault()}});
-  const end=e=>{if(e.pointerId!==alphaPointerId)return;alphaPointerActive=false;alphaPointerId=null;setTimeout(()=>$('alphaBubble').classList.add('hidden'),350)};
-  idx.addEventListener('pointerup',end);idx.addEventListener('pointercancel',end)
+function renderAlphaIndex(){
+  const btn=$('alphaQuickBtn');if(!btn)return;
+  const visible=!!(document.querySelector('#shopping.tab.active')||shoppingModeOpen);
+  btn.classList.toggle('hidden',!visible)
+}
+function setupAlphaIndex(){
+  const btn=$('alphaQuickBtn'),picker=$('alphaPicker'),grid=$('alphaGrid'),close=$('closeAlphaPicker');
+  if(!btn||!picker||!grid||btn.dataset.ready)return;btn.dataset.ready='1';
+  grid.innerHTML=ALPHABET.map(l=>`<button type="button" data-letter="${l}">${l}</button>`).join('');
+  const shut=()=>picker.classList.add('hidden');
+  btn.onclick=()=>{picker.classList.remove('hidden');requestAnimationFrame(()=>grid.querySelector('button')?.focus({preventScroll:true}))};
+  close.onclick=shut;
+  picker.addEventListener('click',e=>{if(e.target===picker)shut()});
+  grid.addEventListener('click',e=>{const b=e.target.closest('[data-letter]');if(!b)return;const l=b.dataset.letter;shut();jumpAlpha(l)});
 }
 function jumpAlpha(letter){
   const base=$('shopSort')?.value||'dept';if(base!=='alpha'&&!alphaPeek)alphaPeek={base,scrollPos:currentShopScroll()};renderShopping();
-  requestAnimationFrame(()=>setTimeout(()=>{const c=shoppingModeOpen?$('shopModeList'):$('shoppingList'),heads=[...c.querySelectorAll('[data-letter-header]')],h=heads.find(x=>x.dataset.letterHeader===letter)||heads.find(x=>x.dataset.letterHeader>letter);if(h)h.scrollIntoView({behavior:'auto',block:'start'})},20))
+  requestAnimationFrame(()=>setTimeout(()=>{const c=shoppingModeOpen?$('shopModeList'):$('shoppingList'),heads=[...c.querySelectorAll('[data-letter-header]')],h=heads.find(x=>x.dataset.letterHeader===letter)||heads.find(x=>x.dataset.letterHeader>letter);if(h)h.scrollIntoView({behavior:'auto',block:'start'})},25))
 }
 
 function portionableItem(it){const d=it.department||'';return ['Carne','Pesce','Salumi','Latticini e uova','Cereali e pane','Legumi','Frutta secca e snack'].includes(d)}

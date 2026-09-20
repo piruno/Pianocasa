@@ -1,4 +1,4 @@
-const CACHE="pianocasa-v9";
+const CACHE="pianocasa-v10";
 const ASSETS=["./","./index.html","./style.css","./app.js","./config.js","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",e=>{

@@ -57,7 +57,13 @@
   <div id="shopModeList" class="shopModeList"></div>
   <div class="shopModeBottom"><button id="nextShopGroup" class="primary">Reparto successivo ↓</button></div>
 </section>
-<div id="alphaIndex" class="alphaIndex hidden"></div><div id="alphaBubble" class="alphaBubble hidden">A</div>
+<button id="alphaQuickBtn" class="alphaQuickBtn hidden" aria-label="Trova rapidamente per lettera">A–Z</button>
+<section id="alphaPicker" class="alphaPicker hidden" aria-modal="true" role="dialog">
+  <div class="alphaPickerSheet">
+    <div class="alphaPickerHead"><div><b>Trova per lettera</b><div class="muted">Tocca una lettera: la lista passa temporaneamente in A–Z.</div></div><button id="closeAlphaPicker" class="ghost">✕</button></div>
+    <div id="alphaGrid" class="alphaGrid"></div>
+  </div>
+</section>
 
 <section id="menuOverlay" class="menuOverlay hidden">
   <div class="menuOverlayTop">
