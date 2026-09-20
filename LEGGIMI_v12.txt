@@ -1,0 +1,20 @@
+PIANOCASA v12 — A–Z DEFINITIVO
+
+Sostituisci su GitHub:
+- app.js
+- index.html
+- style.css
+- sw.js
+
+Correzione:
+- Tutte le lettere A–Z sono SEMPRE cliccabili.
+- Il salto NON dipende più dal conteggio dei prodotti rilevati.
+- Toccando L si apre sempre la sezione L.
+- Toccando Y si apre sempre la sezione Y.
+- Se esistono prodotti, li vedi sotto la lettera.
+- Se non esistono prodotti, la sezione resta comunque presente e mostra:
+  "Nessun prodotto con la lettera X".
+- Quando la ricerca A–Z è temporanea da Iper Tosano/Reparti, spuntando un
+  prodotto si ritorna all'ordinamento precedente come già previsto.
+- La lista alfabetica temporanea crea tutte le sezioni A-Z in anticipo,
+  quindi non può più saltare a una lettera vicina o restare immobile.

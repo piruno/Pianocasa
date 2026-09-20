@@ -390,7 +390,11 @@ function inferTosanoAisle(x){
 }
 function generalRank(dep){const i=GENERAL_DEPTS.indexOf(dep||'Altro');return i<0?999:i}
 function shopSortMode(){return alphaPeek?'alpha':($('shopSort')?.value||'dept')}
-function shopGroup(x,mode){if(mode==='alpha')return (x.name.trim()[0]||'#').toUpperCase();if(mode==='tosano')return inferTosanoAisle(x)||'?';return x.department||'Altro'}
+function initialLetter(name){
+  const s=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();
+  const c=s[0]||'#';return /^[A-Z]$/.test(c)?c:'#'
+}
+function shopGroup(x,mode){if(mode==='alpha')return initialLetter(x.name);if(mode==='tosano')return inferTosanoAisle(x)||'?';return x.department||'Altro'}
 function compareShop(a,b,mode){
   if(mode==='alpha')return a.name.localeCompare(b.name,'it',{sensitivity:'base'});
   if(mode==='tosano'){const aa=inferTosanoAisle(a),bb=inferTosanoAisle(b),ra=aa==null?999:(TOSANO_RANK[aa]??998),rb=bb==null?999:(TOSANO_RANK[bb]??998);return ra-rb||a.name.localeCompare(b.name,'it')}
@@ -425,18 +429,56 @@ function addShopGroupHeader(box,group,mode,fullscreen){
   else if(mode==='alpha')h.textContent=group;else h.textContent=group;
   box.appendChild(h)
 }
+function renderShopRow(box,x,r,mode,fullscreen){
+  const done=itemChecked(x,r);
+  const row=document.createElement('div');row.className='shoprow'+(done?' checked':'')+(fullscreen?' shoprowMode':'');row.dataset.itemKey=x.key;
+  const pieces=approxPieces(x),aisle=inferTosanoAisle(x),manual=!!manualAisle(x.name);
+  row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
+  row.querySelector('input').onchange=e=>checkShopItem(x,e.target.checked);
+  row.querySelector('.aisleEdit')?.addEventListener('click',()=>openAisleModal(x));
+  row.querySelector('.deleteExtra')?.addEventListener('click',async()=>{if(!confirm(`Eliminare "${x.name}" dagli EXTRA?`))return;await deleteDoc(doc(db,'households',householdId,'extras',x.id))});
+  box.appendChild(row)
+}
 function renderShopList(box,{fullscreen=false}={}){
-  if(!box)return;const r=shopRange(),mode=shopSortMode();let arr=allShopItems(r).sort((a,b)=>compareShop(a,b,mode));
+  if(!box)return;
+  const r=shopRange(),mode=shopSortMode();
+  let arr=allShopItems(r).sort((a,b)=>compareShop(a,b,mode));
+  if(hideDone)arr=arr.filter(x=>!itemChecked(x,r));
   box.innerHTML='';
-  if(alphaPeek){const bar=document.createElement('div');bar.className='alphaPeekBar';bar.innerHTML=`<span>Ricerca rapida A–Z</span><button>Torna a ${$('shopSort')?.selectedOptions?.[0]?.textContent||'lista'}</button>`;bar.querySelector('button').onclick=()=>{const p=alphaPeek;alphaPeek=null;renderShopping();restoreShopScroll(p.scrollPos)};box.appendChild(bar)}
-  let last='';for(const x of arr){const done=itemChecked(x,r);if(hideDone&&done)continue;const group=shopGroup(x,mode);if(group!==last){last=group;addShopGroupHeader(box,group,mode,fullscreen)}
-    const row=document.createElement('div');row.className='shoprow'+(done?' checked':'')+(fullscreen?' shoprowMode':'');row.dataset.itemKey=x.key;
-    const pieces=approxPieces(x),aisle=inferTosanoAisle(x),manual=!!manualAisle(x.name);
-    row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
-    row.querySelector('input').onchange=e=>checkShopItem(x,e.target.checked);
-    row.querySelector('.aisleEdit')?.addEventListener('click',()=>openAisleModal(x));
-    row.querySelector('.deleteExtra')?.addEventListener('click',async()=>{if(!confirm(`Eliminare "${x.name}" dagli EXTRA?`))return;await deleteDoc(doc(db,'households',householdId,'extras',x.id))});
-    box.appendChild(row)
+
+  if(alphaPeek){
+    const bar=document.createElement('div');bar.className='alphaPeekBar';
+    bar.innerHTML=`<span>Ricerca rapida A–Z</span><button>Torna a ${$('shopSort')?.selectedOptions?.[0]?.textContent||'lista'}</button>`;
+    bar.querySelector('button').onclick=()=>{const p=alphaPeek;alphaPeek=null;renderShopping();restoreShopScroll(p.scrollPos)};
+    box.appendChild(bar)
+  }
+
+  if(mode==='alpha'){
+    const byLetter=Object.fromEntries(ALPHABET.map(l=>[l,[]]));
+    for(const x of arr){
+      const l=initialLetter(x.name);
+      if(byLetter[l])byLetter[l].push(x)
+    }
+    for(const letter of ALPHABET){
+      addShopGroupHeader(box,letter,'alpha',fullscreen);
+      const items=byLetter[letter];
+      if(!items.length){
+        const empty=document.createElement('div');
+        empty.className='alphaEmptySection';
+        empty.textContent=`Nessun prodotto con la lettera ${letter}`;
+        box.appendChild(empty);
+      }else{
+        for(const x of items)renderShopRow(box,x,r,mode,fullscreen)
+      }
+    }
+    return
+  }
+
+  let last='';
+  for(const x of arr){
+    const group=shopGroup(x,mode);
+    if(group!==last){last=group;addShopGroupHeader(box,group,mode,fullscreen)}
+    renderShopRow(box,x,r,mode,fullscreen)
   }
   if(!arr.length)box.innerHTML='<div class="emptyHistory">Nessun prodotto nel periodo selezionato.</div>'
 }
@@ -470,24 +512,87 @@ $('nextShopGroup')?.addEventListener('click',()=>{
   const top=ov.getBoundingClientRect().top+95,next=heads.find(h=>h.getBoundingClientRect().top>top+25);(next||heads[0]).scrollIntoView({behavior:'smooth',block:'start'})
 });
 const ALPHABET='ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+function visibleAlphaCounts(){
+  const r=shopRange(),counts=Object.fromEntries(ALPHABET.map(l=>[l,0]));
+  for(const x of allShopItems(r)){
+    if(hideDone&&itemChecked(x,r))continue;
+    const l=initialLetter(x.name);
+    if(counts[l]!=null)counts[l]++
+  }
+  return counts
+}
 function renderAlphaIndex(){
   const btn=$('alphaQuickBtn');if(!btn)return;
   const visible=!!(document.querySelector('#shopping.tab.active')||shoppingModeOpen);
   btn.classList.toggle('hidden',!visible)
 }
+function refreshAlphaPicker(){
+  const grid=$('alphaGrid');if(!grid)return;
+  const counts=visibleAlphaCounts();
+  grid.innerHTML=ALPHABET.map(l=>{
+    const n=counts[l]||0;
+    return `<button type="button" data-letter="${l}" aria-label="${n?`${l}, ${n} prodotti`:`${l}, nessun prodotto`}"><span>${l}</span><small>${n}</small></button>`
+  }).join('')
+}
 function setupAlphaIndex(){
   const btn=$('alphaQuickBtn'),picker=$('alphaPicker'),grid=$('alphaGrid'),close=$('closeAlphaPicker');
   if(!btn||!picker||!grid||btn.dataset.ready)return;btn.dataset.ready='1';
-  grid.innerHTML=ALPHABET.map(l=>`<button type="button" data-letter="${l}">${l}</button>`).join('');
   const shut=()=>picker.classList.add('hidden');
-  btn.onclick=()=>{picker.classList.remove('hidden');requestAnimationFrame(()=>grid.querySelector('button')?.focus({preventScroll:true}))};
+  btn.onclick=()=>{
+    refreshAlphaPicker();
+    picker.classList.remove('hidden');
+    requestAnimationFrame(()=>grid.querySelector('button:not(:disabled)')?.focus({preventScroll:true}))
+  };
   close.onclick=shut;
   picker.addEventListener('click',e=>{if(e.target===picker)shut()});
-  grid.addEventListener('click',e=>{const b=e.target.closest('[data-letter]');if(!b)return;const l=b.dataset.letter;shut();jumpAlpha(l)});
+  grid.addEventListener('click',e=>{
+    const b=e.target.closest('[data-letter]');
+    if(!b)return;
+    const l=b.dataset.letter;shut();jumpAlpha(l)
+  })
+}
+function scrollToExactAlphaHeader(letter){
+  const c=shoppingModeOpen?$('shopModeList'):$('shoppingList');
+  if(!c)return false;
+  const target=[...c.querySelectorAll('[data-letter-header]')].find(x=>x.dataset.letterHeader===letter);
+  if(!target)return false;
+
+  if(shoppingModeOpen){
+    const scroller=$('shopModeOverlay');
+    const topBar=scroller.querySelector('.shopModeTop');
+    const offset=(topBar?.offsetHeight||86)+8;
+    const srect=scroller.getBoundingClientRect(),trect=target.getBoundingClientRect();
+    const y=Math.max(0,scroller.scrollTop+(trect.top-srect.top)-offset);
+    scroller.scrollTo({top:y,behavior:'auto'})
+  }else{
+    const nav=document.querySelector('.tabs');
+    const desired=(nav?.getBoundingClientRect().bottom||0)+8;
+    const y=Math.max(0,window.scrollY+target.getBoundingClientRect().top-desired);
+    window.scrollTo({top:y,behavior:'auto'})
+  }
+  target.classList.add('alphaTargetFlash');
+  setTimeout(()=>target.classList.remove('alphaTargetFlash'),650);
+  return true
 }
 function jumpAlpha(letter){
-  const base=$('shopSort')?.value||'dept';if(base!=='alpha'&&!alphaPeek)alphaPeek={base,scrollPos:currentShopScroll()};renderShopping();
-  requestAnimationFrame(()=>setTimeout(()=>{const c=shoppingModeOpen?$('shopModeList'):$('shoppingList'),heads=[...c.querySelectorAll('[data-letter-header]')],h=heads.find(x=>x.dataset.letterHeader===letter)||heads.find(x=>x.dataset.letterHeader>letter);if(h)h.scrollIntoView({behavior:'auto',block:'start'})},25))
+  if(!ALPHABET.includes(letter))return;
+
+  const base=$('shopSort')?.value||'dept';
+  if(base!=='alpha'&&!alphaPeek){
+    alphaPeek={base,scrollPos:currentShopScroll(),letter}
+  }else if(alphaPeek){
+    alphaPeek.letter=letter
+  }
+
+  renderShopping();
+
+  // Due frame: prima il DOM viene ricostruito, poi misuriamo la posizione reale.
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{
+    const ok=scrollToExactAlphaHeader(letter);
+    if(!ok&&alphaPeek){
+      const p=alphaPeek;alphaPeek=null;renderShopping();restoreShopScroll(p.scrollPos)
+    }
+  }))
 }
 
 function portionableItem(it){const d=it.department||'';return ['Carne','Pesce','Salumi','Latticini e uova','Cereali e pane','Legumi','Frutta secca e snack'].includes(d)}
