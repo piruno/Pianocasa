@@ -8,6 +8,7 @@
 <header><div><h1>🥗 PianoCasa</h1><div class="muted">Due diete, una spesa condivisa</div></div><button id="signoutBtn" class="ghost hidden">Esci</button></header>
 <main>
 <section id="setupView" class="card hidden"><h2>Configurazione cloud</h2><p>Il collegamento gratuito a Firebase non è ancora configurato. Apri <b>config.js</b> e incolla i dati della tua app Web Firebase seguendo la guida inclusa.</p></section>
+<section id="authLoadingView" class="card hidden authLoading"><h2>Accesso automatico…</h2><p class="muted">Ripristino della sessione salvata su questo dispositivo.</p></section>
 <section id="authView" class="card hidden"><h2>Accesso</h2><div class="grid2"><input id="email" type="email" placeholder="Email"><input id="password" type="password" placeholder="Password (min. 6 caratteri)"></div><div class="actions"><button id="loginBtn" class="primary">Accedi</button><button id="registerBtn">Crea account</button></div><div id="authMsg" class="msg"></div></section>
 <section id="onboardView" class="card hidden"><h2>Collega il tuo profilo</h2><div id="onboardBody"></div></section>
 <section id="appView" class="hidden">
@@ -48,7 +49,7 @@
   </div>
   <div id="portionList"></div>
 </section>
-<section id="settings" class="tab"><div class="card"><h2>Account e notifiche</h2><div id="memberInfo"></div><label>Ora notifica mattutina<input id="notifyAt" type="time" value="07:30"></label><label class="switch"><input id="includePartner" type="checkbox"><span>Su questo telefono ricevi anche il menu dell'altro profilo</span></label><div class="actions"><button id="saveNotify" class="primary">Salva</button><button id="enablePush">Attiva notifiche su questo iPhone</button></div><div id="pushMsg" class="msg"></div></div><div class="card"><h2>Famiglia</h2><div id="inviteArea"></div></div><div class="card"><h2>Importa diete private</h2><p class="muted">Solo il primo account deve farlo. Il file privato non va caricato su GitHub.</p><input id="seedFile" type="file" accept="application/json"><button id="importSeed" class="primary">Importa</button><div id="seedMsg" class="msg"></div></div><div class="card"><h2>Limiti alimentari</h2><div id="rulesList"></div></div></section>
+<section id="settings" class="tab"><div class="card"><h2>Account e notifiche</h2><div id="memberInfo"></div><label>Ora notifica mattutina<input id="notifyAt" type="time" value="07:30"></label><label class="switch"><input id="includePartner" type="checkbox"><span>Su questo telefono ricevi anche il menu dell'altro profilo</span></label><div class="actions"><button id="saveNotify" class="primary">Salva</button><button id="enablePush">Attiva notifiche su questo iPhone</button></div><div id="pushMsg" class="msg"></div></div><div class="card"><h2>Siri e Comandi Rapidi</h2><div id="siriSettings"><p class="muted">Caricamento…</p></div></div><div class="card"><h2>Famiglia</h2><div id="inviteArea"></div></div><div class="card"><h2>Importa diete private</h2><p class="muted">Solo il primo account deve farlo. Il file privato non va caricato su GitHub.</p><input id="seedFile" type="file" accept="application/json"><button id="importSeed" class="primary">Importa</button><div id="seedMsg" class="msg"></div></div><div class="card"><h2>Limiti alimentari</h2><div id="rulesList"></div></div></section>
 </section>
 </main>
 

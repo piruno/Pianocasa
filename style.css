@@ -193,3 +193,11 @@ header{position:relative;top:auto;z-index:1}
   width:92px;height:92px;border-radius:24px;display:grid;place-items:center;
   background:#dfece8;color:#155f56;font-size:48px;font-weight:950;margin-bottom:8px;
 }
+
+
+/* ===== v15: accesso persistente + Siri ===== */
+.authLoading{text-align:center;padding:28px 18px}
+.siriReady{display:inline-block;background:#e5f4ee;color:#146052;border-radius:999px;padding:7px 10px;font-weight:900;font-size:12px;margin-bottom:8px}
+.siriFields{display:grid;gap:6px;margin:12px 0}
+.siriFields>b{font-size:12px}
+.siriFields code{display:block;white-space:normal;overflow-wrap:anywhere;background:#f2f6f4;border:1px solid #dfe9e5;border-radius:9px;padding:7px 9px;font-size:10px;color:#31584f}

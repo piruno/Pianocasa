@@ -1,9 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { initializeAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, indexedDBLocalPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
-let app,auth,db,user,userDoc,householdId,member,profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false;
+let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
 let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaResultLetter=null,alphaReturnScroll=0;
@@ -13,22 +13,26 @@ if(badConfig){
   $('setupView').classList.remove('hidden')
 }else{
   app=initializeApp(C.firebase);
-  auth=getAuth(app);
+  auth=initializeAuth(app,{persistence:[indexedDBLocalPersistence,browserLocalPersistence]});
   db=getFirestore(app);
-  $('authView').classList.remove('hidden');
   initPersistentAuth();
 }
 
 async function initPersistentAuth(){
+  show('authLoadingView');
   try{
-    // Mantiene l'accesso tra chiusure e riaperture della PWA/iPhone.
-    await setPersistence(auth,browserLocalPersistence);
-  }catch(e){
-    console.warn('Persistenza login non disponibile:',e);
-  }
-  onAuthStateChanged(auth,handleAuth);
+    // Se il browser lo supporta, chiediamo che i dati locali non vengano
+    // eliminati automaticamente in condizioni normali.
+    if(navigator.storage?.persist) navigator.storage.persist().catch(()=>{});
+  }catch(e){}
+  onAuthStateChanged(auth,handleAuth,err=>{
+    console.error(err);
+    $('authMsg').textContent='Errore nel ripristino della sessione.';
+    show('authView');
+  });
 }
 function isoToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+try{const lastEmail=localStorage.getItem('pianocasa_last_email');if(lastEmail&&$('email'))$('email').value=lastEmail}catch(e){}
 function parseISO(s){const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)}
 function addDays(s,n){const d=parseISO(s);d.setDate(d.getDate()+n);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function fmt(s,short=false){if(!s)return'';return new Intl.DateTimeFormat('it-IT',short?{weekday:'short',day:'2-digit',month:'2-digit'}:{weekday:'long',day:'numeric',month:'long',year:'numeric'}).format(parseISO(s))}
@@ -56,8 +60,8 @@ function dayDoc(pid,date){return days.find(x=>x.profileId===pid&&x.date===date)|
 function selectedItem(p,d,c){const id=d.selections?.[c.id];return id?c.items.find(x=>x.id===id):null}
 function totalKcal(p,d){let t=0;for(const c of activeCats(p,d.date)){const i=selectedItem(p,d,c);if(i)t+=i.kcal}return t}
 function complete(p,d){return activeCats(p,d.date).every(c=>selectedItem(p,d,c))}
-function show(id){['authView','onboardView','appView'].forEach(x=>$(x).classList.toggle('hidden',x!==id));$('signoutBtn').classList.toggle('hidden',id!=='appView')}
-$('loginBtn')?.addEventListener('click',async()=>{try{await signInWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);$('authMsg').textContent=''}catch(e){$('authMsg').textContent=e.message}})
+function show(id){['authLoadingView','authView','onboardView','appView'].forEach(x=>$(x)?.classList.toggle('hidden',x!==id));$('signoutBtn').classList.toggle('hidden',id!=='appView')}
+$('loginBtn')?.addEventListener('click',async()=>{try{const email=$('email').value.trim();await signInWithEmailAndPassword(auth,email,$('password').value);localStorage.setItem('pianocasa_last_email',email);$('authMsg').textContent=''}catch(e){$('authMsg').textContent=e.message}})
 $('registerBtn')?.addEventListener('click',async()=>{try{await createUserWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);$('authMsg').textContent=''}catch(e){$('authMsg').textContent=e.message}})
 $('signoutBtn').onclick=()=>signOut(auth);
 async function handleAuth(u){clearListeners();user=u;if(!u){show('authView');return}const snap=await getDoc(doc(db,'users',u.uid));if(!snap.exists()){show('onboardView');renderOnboard()}else{userDoc=snap.data();householdId=userDoc.householdId;currentProfileId=userDoc.profileId;await startApp()}}
@@ -69,8 +73,9 @@ async function startApp(){
   show('appView');
   const ms=await getDoc(doc(db,'households',householdId,'members',user.uid));
   member=ms.data();currentProfileId=currentProfileId||member.profileId;
-  listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll()}));
+  listeners.push(onSnapshot(doc(db,'households',householdId),s=>{householdDoc=s.data()||{};renderSiriSettings();scheduleSiriSync()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll();scheduleSiriSync()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll();scheduleSiriSync()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping();renderPortions()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{checks={};s.forEach(x=>checks[x.id]=x.data());renderShopping();renderPortions()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'storeMappings'),s=>{storeMappings={};s.forEach(x=>storeMappings[x.id]=x.data());renderShopping()}));
@@ -783,7 +788,103 @@ $('menuPrev')?.addEventListener('click',()=>openMenuOverlay(addDays(menuOverlayD
 $('menuNext')?.addEventListener('click',()=>openMenuOverlay(addDays(menuOverlayDate||currentDate,1)));
 $('openMenuSummary')?.addEventListener('click',()=>openMenuOverlay(currentDate));
 
-async function renderMember(){const s=await getDoc(doc(db,'households',householdId,'members',user.uid));member=s.data();$('memberInfo').innerHTML=`<b>${member.displayName}</b><div class="muted">${user.email}</div>`;$('notifyAt').value=member.notifyAt||'07:30';$('includePartner').checked=!!member.includePartnerMenu;renderInvite()}
+
+function randomSiriToken(){
+  const b=new Uint8Array(24);crypto.getRandomValues(b);
+  return btoa(String.fromCharCode(...b)).replaceAll('+','-').replaceAll('/','_').replaceAll('=','');
+}
+function mealSpeech(p,d,meal){
+  if(!meal)return 'non previsto';
+  if(isFreeMeal(d.date,meal))return `${meal.label}: pasto libero`;
+  const parts=[];
+  for(const c of meal.categories){
+    const it=selectedItem(p,d,c);
+    if(it)parts.push(`${it.name}${it.grams!=null?` ${it.grams} grammi`:''}`)
+  }
+  return parts.length?`${meal.label}: ${parts.join(', ')}`:`${meal.label}: non ancora compilato`
+}
+function siriProfilePayload(p,date){
+  const d=dayDoc(p.id,date);
+  const breakfast=p.meals.find(m=>m.id==='breakfast');
+  const lunch=p.meals.find(m=>m.id==='lunch');
+  const dinner=p.meals.find(m=>m.id==='dinner');
+  const snackMeals=p.meals.filter(m=>m.id==='morning_snack'||m.id==='snack');
+  const snack=snackMeals.length?snackMeals.map(m=>mealSpeech(p,d,m)).join('. '):'Spuntino: non previsto';
+  const full=p.meals.map(m=>mealSpeech(p,d,m)).join('. ');
+  return{
+    breakfast:mealSpeech(p,d,breakfast),
+    lunch:mealSpeech(p,d,lunch),
+    snack,
+    dinner:mealSpeech(p,d,dinner),
+    full:`${p.displayName}. ${full}`
+  }
+}
+function scheduleSiriSync(){
+  if(!householdDoc?.siriToken||!householdId||!Object.keys(profiles).length)return;
+  clearTimeout(siriSyncTimer);
+  siriSyncTimer=setTimeout(()=>syncSiriPublic().catch(e=>console.warn('Siri sync:',e)),450);
+}
+async function syncSiriPublic(){
+  const token=householdDoc?.siriToken;
+  if(!token||!householdId||!Object.keys(profiles).length)return;
+  const date=isoToday(),payload={householdId,date,updatedAt:Date.now()};
+  for(const p of Object.values(profiles)){
+    const x=siriProfilePayload(p,date);
+    payload[`${p.id}_breakfast`]=x.breakfast;
+    payload[`${p.id}_lunch`]=x.lunch;
+    payload[`${p.id}_snack`]=x.snack;
+    payload[`${p.id}_dinner`]=x.dinner;
+    payload[`${p.id}_full`]=x.full;
+  }
+  await setDoc(doc(db,'siriPublic',token),payload);
+  renderSiriSettings()
+}
+function siriDataUrl(){
+  const t=householdDoc?.siriToken;
+  if(!t)return '';
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(C.firebase.projectId)}/databases/(default)/documents/siriPublic/${encodeURIComponent(t)}`
+}
+function renderSiriSettings(){
+  const box=$('siriSettings');if(!box||!member)return;
+  const token=householdDoc?.siriToken;
+  if(!token){
+    box.innerHTML=`<p class="muted">Attiva una volta il collegamento per usare i menu di PianoCasa nei Comandi Rapidi e con Siri.</p><button id="enableSiriLink" class="primary">Attiva collegamento Siri</button>`;
+    $('enableSiriLink').onclick=enableSiriLink;
+    return
+  }
+  const own=member.profileId,partner=Object.values(profiles).find(p=>p.id!==own)?.id||'anna';
+  box.innerHTML=`<div class="siriReady">✓ Collegamento Siri attivo</div>
+    <p class="small muted">Il collegamento contiene una chiave casuale. Chi possiede l'URL può leggere soltanto il riepilogo giornaliero esposto per Siri e non può modificare i dati.</p>
+    <div class="siriFields">
+      <b>Campi per questo iPhone (${profiles[own]?.displayName||own})</b>
+      <code>Colazione → ${own}_breakfast</code>
+      <code>Pranzo → ${own}_lunch</code>
+      <code>Spuntino → ${own}_snack</code>
+      <code>Cena → ${own}_dinner</code>
+      <code>Menu di oggi → ${own}_full</code>
+      <code>Menu partner → ${partner}_full</code>
+    </div>
+    <div class="actions">
+      <button id="copySiriUrl">Copia URL dati Siri</button>
+      <button id="syncSiriNow">Aggiorna ora</button>
+      <button id="regenSiri" class="danger">Rigenera chiave</button>
+    </div>
+    <div id="siriMsg" class="msg"></div>`;
+  $('copySiriUrl').onclick=async()=>{try{await navigator.clipboard.writeText(siriDataUrl());$('siriMsg').textContent='URL copiato.'}catch(e){$('siriMsg').textContent=siriDataUrl()}};
+  $('syncSiriNow').onclick=async()=>{await syncSiriPublic();$('siriMsg').textContent='Menu Siri aggiornato.'};
+  $('regenSiri').onclick=async()=>{
+    if(!confirm('Rigenerare la chiave Siri? I vecchi Comandi Rapidi smetteranno di funzionare finché non sostituisci il loro URL.'))return;
+    const old=householdDoc.siriToken,next=randomSiriToken();
+    await updateDoc(doc(db,'households',householdId),{siriToken:next,siriUpdatedAt:Date.now()});
+    try{await deleteDoc(doc(db,'siriPublic',old))}catch(e){}
+  }
+}
+async function enableSiriLink(){
+  const token=randomSiriToken();
+  await updateDoc(doc(db,'households',householdId),{siriToken:token,siriUpdatedAt:Date.now()});
+}
+
+async function renderMember(){const s=await getDoc(doc(db,'households',householdId,'members',user.uid));member=s.data();$('memberInfo').innerHTML=`<b>${member.displayName}</b><div class="muted">${user.email}</div>`;$('notifyAt').value=member.notifyAt||'07:30';$('includePartner').checked=!!member.includePartnerMenu;renderInvite();renderSiriSettings()}
 $('saveNotify').onclick=async()=>{await updateDoc(doc(db,'households',householdId,'members',user.uid),{notifyAt:$('notifyAt').value,includePartnerMenu:$('includePartner').checked});$('pushMsg').textContent='Impostazioni salvate.';renderMember()};
 async function renderInvite(){const area=$('inviteArea');if(!member?.owner){area.innerHTML='<div class="muted">Sei collegata alla famiglia.</div>';return}const qs=await getDocs(query(collection(db,'invites'),where('householdId','==',householdId),where('profileId','==','anna')));let active=qs.docs.find(x=>!x.data().claimedBy);if(active){area.innerHTML=`Codice per Anna: <b>${active.id}</b>`;return}area.innerHTML='<button id="makeInvite">Genera codice per Anna</button>';$('makeInvite').onclick=async()=>{const code=Math.random().toString(36).slice(2,10).toUpperCase();await setDoc(doc(db,'invites',code),{householdId,profileId:'anna',displayName:'Anna',createdBy:user.uid,createdAt:Date.now(),claimedBy:null});renderInvite()}}
 $('enablePush').onclick=async()=>{try{if(!('serviceWorker'in navigator)||!('PushManager'in window))throw new Error('Push non supportato. Su iPhone installa prima l’app nella schermata Home.');const reg=await navigator.serviceWorker.register('./sw.js');const perm=await Notification.requestPermission();if(perm!=='granted')throw new Error('Permesso notifiche non concesso.');const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64(C.vapidPublicKey)});const j=sub.toJSON(),id=idSafe(user.uid+'_'+j.endpoint);await setDoc(doc(db,'households',householdId,'pushSubscriptions',id),{uid:user.uid,profileId:member.profileId,endpoint:j.endpoint,keys:j.keys,createdAt:Date.now()});$('pushMsg').textContent='Notifiche attive su questo iPhone.'}catch(e){$('pushMsg').textContent=e.message}}
