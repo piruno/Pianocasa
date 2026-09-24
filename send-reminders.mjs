@@ -10,16 +10,37 @@ for(const h of hs.docs){const hid=h.id,hdata=h.data();const members=await db.col
    for(const [pid,p] of Object.entries(pmap)){
      const ds=(await db.doc(`households/${hid}/days/${pid}_${today}`).get()).data()||{};
      const s=ds.summary||{};
-     const meal=(key,label)=>s[key]?`${label}: ${s[key]}`:`${label}: non ancora compilato`;
-     const snacks=[];
-     if(s.morning_snack)snacks.push(`Spuntino: ${s.morning_snack}`);
-     if(s.snack)snacks.push(`Merenda: ${s.snack}`);
-     siri[`${pid}_breakfast`]=meal('breakfast','Colazione');
-     siri[`${pid}_lunch`]=meal('lunch','Pranzo');
-     siri[`${pid}_snack`]=snacks.length?snacks.join('. '):'Spuntino: non ancora compilato';
-     siri[`${pid}_dinner`]=meal('dinner','Cena');
-     const full=[meal('breakfast','Colazione'),...snacks,meal('lunch','Pranzo'),meal('dinner','Cena')].join('. ');
-     siri[`${pid}_full`]=`${p.displayName||pid}. ${full}`;
+     const hasMeal=id=>(p.meals||[]).some(m=>m.id===id);
+     const say=(id,label,missingText)=>{
+       if(!hasMeal(id))return missingText;
+       return s[id]?`${label}: ${s[id]}`:`${label}: non ancora compilato`;
+     };
+
+     const breakfast=say('breakfast','Colazione','Non hai colazione.');
+     const morningSnack=say('morning_snack','Spuntino','Non hai spuntino.');
+     const lunch=say('lunch','Pranzo','Non hai pranzo.');
+     const afternoonSnack=say('snack','Merenda','Non hai merenda.');
+     const dinner=say('dinner','Cena','Non hai cena.');
+
+     siri[`${pid}_breakfast`]=breakfast;
+     siri[`${pid}_lunch`]=lunch;
+     siri[`${pid}_spuntino`]=morningSnack;
+     siri[`${pid}_merenda`]=afternoonSnack;
+
+     // Compatibilità con i vecchi Comandi Rapidi.
+     siri[`${pid}_snack`]=morningSnack;
+     siri[`${pid}_morning_snack`]=morningSnack;
+     siri[`${pid}_afternoon_snack`]=afternoonSnack;
+
+     siri[`${pid}_dinner`]=dinner;
+
+     const full=[];
+     if(hasMeal('breakfast'))full.push(breakfast);
+     if(hasMeal('morning_snack'))full.push(morningSnack);
+     if(hasMeal('lunch'))full.push(lunch);
+     if(hasMeal('snack'))full.push(afternoonSnack);
+     if(hasMeal('dinner'))full.push(dinner);
+     siri[`${pid}_full`]=`${p.displayName||pid}. ${full.join('. ')}`;
    }
    await db.doc(`siriPublic/${hdata.siriToken}`).set(siri);
  }

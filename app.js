@@ -803,20 +803,47 @@ function mealSpeech(p,d,meal){
   }
   return parts.length?`${meal.label}: ${parts.join(', ')}`:`${meal.label}: non ancora compilato`
 }
+function siriSpecificMeal(p,d,id,label,missingText){
+  const meal=p.meals.find(m=>m.id===id);
+  if(!meal)return missingText;
+  if(isFreeMeal(d.date,meal))return `${label}: pasto libero`;
+  const parts=[];
+  for(const c of meal.categories){
+    const it=selectedItem(p,d,c);
+    if(it)parts.push(`${it.name}${it.grams!=null?` ${it.grams} grammi`:''}`)
+  }
+  return parts.length?`${label}: ${parts.join(', ')}`:`${label}: non ancora compilato`
+}
 function siriProfilePayload(p,date){
   const d=dayDoc(p.id,date);
-  const breakfast=p.meals.find(m=>m.id==='breakfast');
-  const lunch=p.meals.find(m=>m.id==='lunch');
-  const dinner=p.meals.find(m=>m.id==='dinner');
-  const snackMeals=p.meals.filter(m=>m.id==='morning_snack'||m.id==='snack');
-  const snack=snackMeals.length?snackMeals.map(m=>mealSpeech(p,d,m)).join('. '):'Spuntino: non previsto';
-  const full=p.meals.map(m=>mealSpeech(p,d,m)).join('. ');
+
+  const breakfast=siriSpecificMeal(p,d,'breakfast','Colazione','Non hai colazione.');
+  const morningSnack=siriSpecificMeal(p,d,'morning_snack','Spuntino','Non hai spuntino.');
+  const lunch=siriSpecificMeal(p,d,'lunch','Pranzo','Non hai pranzo.');
+  const afternoonSnack=siriSpecificMeal(p,d,'snack','Merenda','Non hai merenda.');
+  const dinner=siriSpecificMeal(p,d,'dinner','Cena','Non hai cena.');
+
+  // Ordine vocale fisso e naturale:
+  // Colazione -> eventuale Spuntino -> Pranzo -> eventuale Merenda -> Cena.
+  // I pasti che quel profilo non possiede NON vengono letti nel menu completo.
+  const orderedIds=['breakfast','morning_snack','lunch','snack','dinner'];
+  const fullParts=orderedIds
+    .filter(id=>p.meals.some(m=>m.id===id))
+    .map(id=>{
+      if(id==='breakfast')return breakfast;
+      if(id==='morning_snack')return morningSnack;
+      if(id==='lunch')return lunch;
+      if(id==='snack')return afternoonSnack;
+      return dinner;
+    });
+
   return{
-    breakfast:mealSpeech(p,d,breakfast),
-    lunch:mealSpeech(p,d,lunch),
-    snack,
-    dinner:mealSpeech(p,d,dinner),
-    full:`${p.displayName}. ${full}`
+    breakfast,
+    morningSnack,
+    lunch,
+    afternoonSnack,
+    dinner,
+    full:`${p.displayName}. ${fullParts.join('. ')}`
   }
 }
 function scheduleSiriSync(){
@@ -832,7 +859,17 @@ async function syncSiriPublic(){
     const x=siriProfilePayload(p,date);
     payload[`${p.id}_breakfast`]=x.breakfast;
     payload[`${p.id}_lunch`]=x.lunch;
-    payload[`${p.id}_snack`]=x.snack;
+
+    // Campi chiari in italiano.
+    payload[`${p.id}_spuntino`]=x.morningSnack;
+    payload[`${p.id}_merenda`]=x.afternoonSnack;
+
+    // Alias compatibili con eventuali Comandi Rapidi già creati.
+    // "_snack" ora significa correttamente "spuntino del mattino".
+    payload[`${p.id}_snack`]=x.morningSnack;
+    payload[`${p.id}_morning_snack`]=x.morningSnack;
+    payload[`${p.id}_afternoon_snack`]=x.afternoonSnack;
+
     payload[`${p.id}_dinner`]=x.dinner;
     payload[`${p.id}_full`]=x.full;
   }
@@ -858,10 +895,11 @@ function renderSiriSettings(){
     <div class="siriFields">
       <b>Campi per questo iPhone (${profiles[own]?.displayName||own})</b>
       <code>Colazione → ${own}_breakfast</code>
+      <code>Spuntino → ${own}_spuntino</code>
       <code>Pranzo → ${own}_lunch</code>
-      <code>Spuntino → ${own}_snack</code>
+      <code>Merenda → ${own}_merenda</code>
       <code>Cena → ${own}_dinner</code>
-      <code>Menu di oggi → ${own}_full</code>
+      <code>Menu PianoCasa → ${own}_full</code>
       <code>Menu partner → ${partner}_full</code>
     </div>
     <div class="actions">
