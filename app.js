@@ -1,9 +1,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { initializeAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, indexedDBLocalPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, runTransaction, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
 let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
+let dietDraft=null,dietBase=null,dietPid=null,dietDirty=false,shopAdjustments={};
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
 let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaResultLetter=null,alphaReturnScroll=0;
@@ -41,6 +42,7 @@ function idSafe(s){return btoa(unescape(encodeURIComponent(s))).replaceAll('/','
 function allCats(p){return p.meals.flatMap(m=>m.categories)}
 function mealForCat(p,catId){return p.meals.find(m=>m.categories.some(c=>c.id===catId))}
 function isFreeMeal(date,meal){
+  if(meal.freeWeekend===false)return false;
   const dow=parseISO(date).getDay();
   return (dow===6&&meal.id==='dinner')||(dow===0&&meal.id==='lunch');
 }
@@ -80,12 +82,14 @@ async function startApp(){
   listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{checks={};s.forEach(x=>checks[x.id]=x.data());renderShopping();renderPortions()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'storeMappings'),s=>{storeMappings={};s.forEach(x=>storeMappings[x.id]=x.data());renderShopping()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'portionChecks'),s=>{portionChecks={};s.forEach(x=>portionChecks[x.id]=x.data());renderPortions()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'shopAdjustments'),s=>{shopAdjustments={};s.forEach(x=>shopAdjustments[x.id]=x.data());renderShopping()}));
   renderMember();setupAlphaIndex();syncShopPeriodControls();
 }
-function renderAll(){if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
+function renderAll(){if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
 function tab(id){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+  if(id==='diet')renderDietEditor();
   if(id==='shopping')renderShopping();
   if(id==='portions')renderPortions();
   if(id==='history')renderHistory();
@@ -94,7 +98,7 @@ function tab(id){
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 function renderProfileSelect(){const s=$('profileSelect');if(!s)return;s.innerHTML='';Object.values(profiles).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.displayName;o.selected=p.id===currentProfileId;s.appendChild(o)});s.onchange=()=>{currentProfileId=s.value;const p=profiles[currentProfileId];currentDate=p.startDate||isoToday();renderAll()}}
 async function saveDay(pid,date,d){const p=profiles[pid];d.summary=buildSummary(p,d);d.kcal=totalKcal(p,d);d.updatedAt=Date.now();await setDoc(doc(db,'households',householdId,'days',`${pid}_${date}`),d,{merge:true})}
-function buildSummary(p,d){const out={};for(const meal of p.meals){if(isFreeMeal(d.date,meal)){out[meal.id]='Pasto libero';continue}let arr=[];for(const c of meal.categories){const it=selectedItem(p,d,c);if(it)arr.push(`${it.name}${it.grams!=null?' '+it.grams+' g':''}`)}out[meal.id]=arr.join(' + ')}return out}
+function buildSummary(p,d){const out={};for(const meal of p.meals){if(isFreeMeal(d.date,meal)){out[meal.id]='Pasto libero';continue}let arr=[];for(const c of meal.categories){const it=selectedItem(p,d,c);if(it)arr.push(`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}`)}out[meal.id]=arr.join(' + ')}return out}
 function mealTotal(p,d,m){if(isFreeMeal(d.date,m))return 0;let t=0;for(const c of m.categories){const i=selectedItem(p,d,c);if(i)t+=i.kcal}return t}
 function missingCategories(p,d){const out=[];for(const meal of p.meals){if(isFreeMeal(d.date,meal))continue;for(const c of meal.categories)if(!selectedItem(p,d,c))out.push({meal,c})}return out}
 function categoryMeta(c){
@@ -199,8 +203,8 @@ function renderToday(){
         <div class="choiceTitle"><div class="choiceKicker">SEZIONE ${idx+1} DI ${meal.categories.length}</div><div class="choiceLabel">${meta.icon} ${c.label}</div><div class="choiceHint">${chosen?'Scelta effettuata':'Scegli 1 alternativa'}</div></div>
         <div class="choiceStatus ${chosen?'ok':'todo'}">${chosen?'✓ COMPLETA':'DA SCEGLIERE'}</div>
       </div>
-      ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${chosen.grams!=null?' — '+chosen.grams+' g':''}</b><small>${chosen.kcal} kcal</small></div><button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button></div>`:''}
-      ${partnerPick?.item&&!partnerPick.common?`<div class="partnerNotice notCommon"><span class="partnerAvatar">👥</span><div><b>${partnerPick.partner.displayName} ha scelto ${partnerPick.item.name}${partnerPick.item.grams!=null?' — '+partnerPick.item.grams+' g':''}</b><small>ALIMENTO NON IN COMUNE: non compare tra le tue alternative.</small></div></div>`:''}
+      ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${foodAmount(chosen)?' — '+foodAmount(chosen):''}</b><small>${chosen.kcal} kcal</small></div><button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button></div>`:''}
+      ${partnerPick?.item&&!partnerPick.common?`<div class="partnerNotice notCommon"><span class="partnerAvatar">👥</span><div><b>${partnerPick.partner.displayName} ha scelto ${partnerPick.item.name}${foodAmount(partnerPick.item)?' — '+foodAmount(partnerPick.item):''}</b><small>ALIMENTO NON IN COMUNE: non compare tra le tue alternative.</small></div></div>`:''}
       <div class="options ${isOpen?'':'collapsed'}"></div>`;
       const opts=box.querySelector('.options');
 
@@ -217,7 +221,7 @@ function renderToday(){
         const sel=d.selections?.[c.id]===it.id;if(sel)b.classList.add('selected');
         const partnerSelected=!!(partnerPick?.common&&partnerPick.matchId===it.id);if(partnerSelected)b.classList.add('partnerSelected');
         const block=blockedReason(p,currentDate,c.id,it.id,d);b.disabled=!sel&&!!block;
-        b.innerHTML=`${it.name}${it.grams!=null?' — '+it.grams+' g':''}<small>${it.kcal} kcal</small>${partnerSelected?`<span class="partnerPickBadge">👥 ${partnerPick.partner.displayName} ha scelto questo${partnerPick.item.grams!=null?' · '+partnerPick.item.grams+' g':''}</span>`:''}${block&&!sel?`<span class="limit">${block}</span>`:''}`;
+        b.innerHTML=`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}<small>${it.kcal} kcal</small>${partnerSelected?`<span class="partnerPickBadge">👥 ${partnerPick.partner.displayName} ha scelto questo${foodAmount(partnerPick.item)?' · '+foodAmount(partnerPick.item):''}</span>`:''}${block&&!sel?`<span class="limit">${block}</span>`:''}`;
         b.onclick=async()=>{
           if(sel){expandedCats.delete(c.id);renderToday();return}
           const nd=structuredClone(dayDoc(p.id,currentDate));nd.selections||={};
@@ -293,9 +297,10 @@ function collectShop(range=shopRange()){
     for(const d of days.filter(x=>x.profileId===p.id&&dateInProfileRange(p,x.date,range))){
       for(const c of activeCats(p,d.date)){
         const it=selectedItem(p,d,c);if(!it)continue;
-        const key=normalizeName(it.name);
-        if(!map.has(key))map.set(key,{key,legacyKey:it.name.toLowerCase(),name:it.name,grams:0,count:0,department:it.department||'Altro',extra:false,categoryLabels:[],sourceDepartments:[]});
-        const x=map.get(key);x.count++;if(it.grams!=null)x.grams+=Number(it.grams);
+        const unit=it.grams!=null?'g':it.unit||'porzioni';
+        const key=normalizeName(it.name)+(unit==='g'?'':'|'+unit);
+        if(!map.has(key))map.set(key,{key,legacyKey:it.name.toLowerCase(),name:it.name,grams:it.grams!=null?0:null,count:0,unit,department:it.department||'Altro',extra:false,categoryLabels:[],sourceDepartments:[]});
+        const x=map.get(key);x.count+=it.grams!=null?1:Number(it.quantity??1);if(it.grams!=null)x.grams+=Number(it.grams);
         if(c.label&&!x.categoryLabels.includes(c.label))x.categoryLabels.push(c.label);
         if(it.department&&!x.sourceDepartments.includes(it.department))x.sourceDepartments.push(it.department)
       }
@@ -310,7 +315,8 @@ function collectShop(range=shopRange()){
   return [...map.values()]
 }
 function allShopItems(range=shopRange()){return collectShop(range).concat(extras.map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
-function qty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
+function qty(x){const adj=shoppingAdjustment(x);if(adj)return `${Number(adj.amount).toLocaleString('it-IT')} ${adj.unit}`;return baseQty(x)}
+function baseQty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
 const PIECE_WEIGHTS={
   'albicocche':[35,50],'arance':[160,220],'banana':[100,140],'carciofi':[180,250],'carote':[80,120],'cavolfiore':[700,1200],'cetrioli':[200,300],
   'cipolle':[120,180],'clementine':[70,100],'fichi':[40,60],"fichi d india":[90,130],'finocchi':[250,350],'mandaranci':[100,150],'mandarini':[80,110],
@@ -319,6 +325,7 @@ const PIECE_WEIGHTS={
   'broccolo a testa':[400,700],'cavolo broccolo verde':[400,700],'zucchine':[150,250],'uova intere':[55,65],"albume d uovo":null
 };
 function approxPieces(x){
+  if(shoppingAdjustment(x))return '';
   if(!x||x.extra||!x.grams||x.grams<=0)return'';const n=normalizeName(x.name);
   if(/cilieg|datter|mirtill|lamp|more|ribes|uva|amarene|asparag|insalata|lattuga|spinaci|rucola|bieta|fagiolini|funghi|cicoria|valeriana|crescione/.test(n))return'';
   let w=null;for(const [k,v] of Object.entries(PIECE_WEIGHTS))if(v&&n===k){w=v;break}if(!w)return'';
@@ -438,7 +445,8 @@ function renderShopRow(box,x,r,mode,fullscreen){
   const done=itemChecked(x,r);
   const row=document.createElement('div');row.className='shoprow'+(done?' checked':'')+(fullscreen?' shoprowMode':'');row.dataset.itemKey=x.key;
   const pieces=approxPieces(x),aisle=inferTosanoAisle(x),manual=!!manualAisle(x.name);
-  row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
+  row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${shoppingAdjustment(x)?`<small>Previsti: ${baseQty(x)}</small>`:''}<button class="editShopQuantity">Modifica quantità</button>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
+  row.querySelector('.editShopQuantity').onclick=()=>editShoppingQuantity(x);
   row.querySelector('input').onchange=e=>checkShopItem(x,e.target.checked);
   row.querySelector('.aisleEdit')?.addEventListener('click',()=>openAisleModal(x));
   row.querySelector('.deleteExtra')?.addEventListener('click',async()=>{if(!confirm(`Eliminare "${x.name}" dagli EXTRA?`))return;await deleteDoc(doc(db,'households',householdId,'extras',x.id))});
@@ -646,8 +654,9 @@ function renderAlphaResult(){
         <b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}
         <div class="muted shopMeta">${x.department||'Altro'}</div>
       </div>
-      <div class="shopQty"><b>${qty(x)}</b>${pieces?`<small>${pieces}</small>`:''}</div>`;
+      <div class="shopQty"><b>${qty(x)}</b>${shoppingAdjustment(x)?`<small>Previsti: ${baseQty(x)}</small>`:''}<button class="editShopQuantity">Modifica quantità</button>${pieces?`<small>${pieces}</small>`:''}</div>`;
 
+    row.querySelector('.editShopQuantity').onclick=()=>editShoppingQuantity(x);
     row.querySelector('input').onchange=e=>{
       const checked=e.target.checked;
       const returnPos=alphaReturnScroll;
@@ -713,7 +722,7 @@ async function copyWeekForProfiles(profileIds,srcStart,dstStart){
 function dayHistorySummary(p,date,d){
   return p.meals.map(meal=>{
     if(isFreeMeal(date,meal))return `<div class="historyMeal"><b>${meal.label}</b><span>🎉 Pasto libero</span></div>`;
-    const parts=meal.categories.map(c=>{const it=selectedItem(p,d,c);return it?`${it.name}${it.grams!=null?' '+it.grams+' g':''}`:'⚠️ mancante'}).join(' · ');
+    const parts=meal.categories.map(c=>{const it=selectedItem(p,d,c);return it?`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}`:'⚠️ mancante'}).join(' · ');
     return `<div class="historyMeal"><b>${meal.label}</b><span>${parts}</span></div>`;
   }).join('');
 }
@@ -774,7 +783,7 @@ function renderMenuOverlay(date){
       if(isFreeMeal(date,meal)){
         block.innerHTML=`<div class="menuMealTitle"><b>${meal.label}</b><span>PASTO LIBERO</span></div><div class="menuFreeMeal">🎉 Pasto libero · nessuna selezione richiesta</div>`;
       }else{
-        const rows=meal.categories.map(c=>{const it=selectedItem(p,d,c);return `<div class="menuCatRow ${it?'':'missing'}"><span>${c.label}</span><b>${it?`${it.name}${it.grams!=null?' — '+it.grams+' g':''}`:'⚠️ Da scegliere'}</b></div>`}).join('');
+        const rows=meal.categories.map(c=>{const it=selectedItem(p,d,c);return `<div class="menuCatRow ${it?'':'missing'}"><span>${c.label}</span><b>${it?`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}`:'⚠️ Da scegliere'}</b></div>`}).join('');
         block.innerHTML=`<div class="menuMealTitle"><b>${meal.label}</b><span>${mealTotal(p,d,meal)} kcal</span></div>${rows}`;
       }
       card.appendChild(block)
@@ -799,7 +808,7 @@ function mealSpeech(p,d,meal){
   const parts=[];
   for(const c of meal.categories){
     const it=selectedItem(p,d,c);
-    if(it)parts.push(`${it.name}${it.grams!=null?` ${it.grams} grammi`:''}`)
+    if(it)parts.push(`${it.name}${foodAmount(it)?' '+foodAmount(it):''}`)
   }
   return parts.length?`${meal.label}: ${parts.join(', ')}`:`${meal.label}: non ancora compilato`
 }
@@ -810,7 +819,7 @@ function siriSpecificMeal(p,d,id,label,missingText){
   const parts=[];
   for(const c of meal.categories){
     const it=selectedItem(p,d,c);
-    if(it)parts.push(`${it.name}${it.grams!=null?` ${it.grams} grammi`:''}`)
+    if(it)parts.push(`${it.name}${foodAmount(it)?' '+foodAmount(it):''}`)
   }
   return parts.length?`${label}: ${parts.join(', ')}`:`${label}: non ancora compilato`
 }
@@ -826,16 +835,7 @@ function siriProfilePayload(p,date){
   // Ordine vocale fisso e naturale:
   // Colazione -> eventuale Spuntino -> Pranzo -> eventuale Merenda -> Cena.
   // I pasti che quel profilo non possiede NON vengono letti nel menu completo.
-  const orderedIds=['breakfast','morning_snack','lunch','snack','dinner'];
-  const fullParts=orderedIds
-    .filter(id=>p.meals.some(m=>m.id===id))
-    .map(id=>{
-      if(id==='breakfast')return breakfast;
-      if(id==='morning_snack')return morningSnack;
-      if(id==='lunch')return lunch;
-      if(id==='snack')return afternoonSnack;
-      return dinner;
-    });
+  const fullParts=p.meals.map(m=>mealSpeech(p,d,m));
 
   return{
     breakfast,
@@ -944,3 +944,72 @@ if('serviceWorker'in navigator){
 window.addEventListener('pageshow',()=>{
   const d=new URL(location.href).searchParams.get('menu');if(d)handleMenuDeepLink(d);
 });
+
+// v17: editor delle diete e quantità di acquisto indipendenti dal piano.
+function safeText(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function newDietId(){return 'custom_'+crypto.randomUUID()}
+function dietNumber(v){const n=Number(String(v).replace(',','.'));if(!Number.isFinite(n)||n<0)throw new Error('Inserisci un numero valido, maggiore o uguale a zero.');return n}
+function renderDietEditor(){
+  const select=$('dietProfile'),box=$('dietEditor');if(!select||!Object.keys(profiles).length)return;
+  if(!dietDraft){dietPid=profiles[dietPid]?dietPid:currentProfileId;dietBase=structuredClone(profiles[dietPid]);dietDraft=structuredClone(dietBase)}
+  select.innerHTML=Object.values(profiles).map(p=>`<option value="${safeText(p.id)}" ${p.id===dietPid?'selected':''}>${safeText(p.displayName)}</option>`).join('');
+  select.onchange=()=>{if(dietDirty&&!confirm('Abbandonare le modifiche non salvate?')){select.value=dietPid;return}dietPid=select.value;dietDraft=null;dietDirty=false;renderDietEditor()};
+  box.innerHTML=`<p class="small">Le modifiche aggiornano anche i menu già compilati e la spesa. Se elimini un alimento selezionato, dovrai scegliere un’alternativa. I limiti alimentari degli alimenti esistenti vengono mantenuti.</p><div class="grid2"><label>Obiettivo kcal<input id="dietTarget" type="number" min="1" value="${dietDraft.targetKcal||1700}"></label></div><div class="actions"><button id="dietSave" class="primary">Salva dieta</button><button id="dietCancel">Annulla modifiche</button><button id="dietRestore">Ripristina salvataggio precedente</button></div><p id="dietStatus" role="status">${dietDirty?'Modifiche non salvate':''}</p><div id="dietMeals"></div><div class="actions"><select id="newMealType" aria-label="Pasto da aggiungere"><option value="breakfast">Colazione</option><option value="morning_snack">Spuntino</option><option value="lunch">Pranzo</option><option value="snack">Merenda</option><option value="dinner">Cena</option><option value="custom">Altro pasto</option></select><button id="dietAddMeal">+ Aggiungi pasto</button></div>`;
+  $('dietTarget').oninput=e=>{dietDraft.targetKcal=Number(e.target.value);markDietDirty()};
+  $('dietCancel').onclick=()=>{if(dietDirty&&!confirm('Annullare le modifiche non salvate?'))return;dietDraft=null;dietDirty=false;renderDietEditor()};
+  $('dietSave').onclick=saveDietEditor;
+  $('dietRestore').onclick=async()=>{try{const s=await getDoc(doc(db,'households',householdId,'dietBackups',dietPid));if(!s.exists())throw new Error('Non ci sono salvataggi precedenti.');if(dietDirty&&!confirm('Sostituire le modifiche non salvate con il salvataggio precedente?'))return;dietDraft=s.data().profile;dietDirty=true;renderDietEditor();$('dietStatus').textContent='Versione precedente caricata: premi Salva dieta per applicarla.'}catch(e){alert(e.message)}};
+  $('dietAddMeal').onclick=()=>{const kind=$('newMealType').value;if(kind!=='custom'&&dietDraft.meals.some(m=>m.id===kind)){alert('Questo pasto è già presente.');return}const label=kind==='custom'?prompt('Nome del pasto:'): $('newMealType').selectedOptions[0].textContent;if(!label?.trim())return;dietDraft.meals.push({id:kind==='custom'?newDietId():kind,label:cleanDietName(label),categories:[]});const order=['breakfast','morning_snack','lunch','snack','dinner'];dietDraft.meals.sort((a,b)=>(order.indexOf(a.id)<0?99:order.indexOf(a.id))-(order.indexOf(b.id)<0?99:order.indexOf(b.id)));dietDirty=true;renderDietEditor()};
+  for(const [mi,m] of dietDraft.meals.entries()){
+    const sec=document.createElement('section');sec.className='dietMeal';
+    sec.innerHTML=`<div class="row"><h3>${safeText(m.label)}</h3><button class="danger removeMeal">Elimina pasto</button></div><div class="actions"><button class="renameMeal">Rinomina</button><button class="moveUp" ${mi===0?'disabled':''}>↑ Prima</button><button class="moveDown" ${mi===dietDraft.meals.length-1?'disabled':''}>↓ Dopo</button></div>${['lunch','dinner'].includes(m.id)?`<label class="switch"><input class="freeWeekend" type="checkbox" ${m.freeWeekend!==false?'checked':''}>Pasto libero ${m.id==='lunch'?'domenica a pranzo':'sabato a cena'}</label>`:''}<div class="dietCategories"></div><button class="addCat">+ Aggiungi sezione</button>`;
+    sec.querySelector('.removeMeal').onclick=()=>{if(confirm(`Eliminare ${m.label} con tutte le sue alternative?`)){dietDraft.meals.splice(mi,1);dietDirty=true;renderDietEditor()}};
+    sec.querySelector('.renameMeal').onclick=()=>{const v=prompt('Nome del pasto:',m.label);if(v?.trim()){m.label=cleanDietName(v);dietDirty=true;renderDietEditor()}};
+    for(const [cls,delta] of [['moveUp',-1],['moveDown',1]])sec.querySelector('.'+cls).onclick=()=>{[dietDraft.meals[mi],dietDraft.meals[mi+delta]]=[dietDraft.meals[mi+delta],dietDraft.meals[mi]];dietDirty=true;renderDietEditor()};
+    sec.querySelector('.freeWeekend')?.addEventListener('change',e=>{m.freeWeekend=e.target.checked;markDietDirty()});
+    sec.querySelector('.addCat').onclick=()=>{const label=prompt('Nome della sezione (es. Frutta, Proteine):');if(label?.trim()){m.categories.push({id:newDietId(),label:cleanDietName(label),items:[]});dietDirty=true;renderDietEditor()}};
+    for(const [ci,c] of m.categories.entries()){
+      const cat=document.createElement('details');cat.className='dietCategory';cat.innerHTML=`<summary>${safeText(c.label)} <small>· ${c.items.length} alternative</small></summary><div class="actions"><button class="renameCat">Rinomina sezione</button><button class="danger removeCat">Elimina sezione</button></div><div class="dietItems"></div><button class="addItem">+ Aggiungi alimento</button>`;
+      cat.querySelector('.renameCat').onclick=()=>{const v=prompt('Nome della sezione:',c.label);if(v?.trim()){c.label=cleanDietName(v);dietDirty=true;renderDietEditor()}};
+      cat.querySelector('.removeCat').onclick=()=>{if(confirm(`Eliminare la sezione ${c.label}?`)){m.categories.splice(ci,1);dietDirty=true;renderDietEditor()}};
+      const drawItems=()=>{const list=cat.querySelector('.dietItems');list.innerHTML='';for(const it of [...c.items].sort((a,b)=>a.name.localeCompare(b.name,'it'))){const row=document.createElement('div');row.className='dietItem';row.innerHTML=`<div><b>${safeText(it.name)}</b><small>${safeText(foodAmount(it))} · ${it.kcal||0} kcal</small></div><button>Modifica</button>`;row.querySelector('button').onclick=()=>editDietFood(c,it,drawItems);list.appendChild(row)}cat.querySelector('summary').innerHTML=`${safeText(c.label)} <small>· ${c.items.length} alternative</small>`};drawItems();
+      cat.querySelector('.addItem').onclick=()=>editDietFood(c,null,drawItems);sec.querySelector('.dietCategories').appendChild(cat);
+    }
+    $('dietMeals').appendChild(sec);
+  }
+}
+function cleanDietName(v){return v.trim().replace(/[<>]/g,'').slice(0,160)}
+function markDietDirty(){dietDirty=true;$('dietStatus').textContent='Modifiche non salvate'}
+function editorDialog(title,html){const dialog=document.createElement('dialog');dialog.className='editorDialog';dialog.innerHTML=`<form method="dialog"><h3>${safeText(title)}</h3>${html}<p class="dialogError" role="alert"></p><div class="actions"><button type="submit" class="primary">Salva</button><button type="button" class="dialogCancel">Annulla</button></div></form>`;document.body.appendChild(dialog);dialog.querySelector('.dialogCancel').onclick=()=>dialog.close();dialog.onclose=()=>dialog.remove();dialog.showModal();return dialog}
+function editDietFood(c,original,redraw){
+  const it=structuredClone(original||{id:newDietId(),name:'',grams:100,kcal:0,department:'Altro',tags:[]});
+  const dialog=editorDialog(original?'Modifica alimento':'Aggiungi alimento',`<label>Nome<input name="foodName" required maxlength="160" value="${safeText(it.name)}"></label><div class="grid2"><label>Quantità<input name="amount" type="number" required min="0.01" step="any" value="${it.grams??it.quantity??1}"></label><label>Unità<select name="unit"><option value="g">g</option><option value="pz" ${it.unit==='pz'?'selected':''}>pezzi</option><option value="ml" ${it.unit==='ml'?'selected':''}>ml</option></select></label><label>kcal della porzione<input name="kcal" type="number" required min="0" step="any" value="${it.kcal||0}"></label><label>Reparto<select name="department">${GENERAL_DEPTS.map(d=>`<option ${d===it.department?'selected':''}>${safeText(d)}</option>`).join('')}</select></label></div><p class="small">Se cambi solo la quantità, le kcal vengono proporzionate. Puoi correggerle dall’etichetta. Le kcal sono della porzione, non di 100 g.</p><fieldset><legend>Limiti alimentari applicabili</legend>${(dietDraft.rules||[]).map((r,i)=>`<label class="switch"><input type="checkbox" name="tag${i}" ${it.tags?.includes(r.tag)?'checked':''}>${safeText(r.label)}</label>`).join('')||'<small>Nessun limite configurato</small>'}</fieldset>${original?'<button type="button" class="danger removeFood">Elimina alimento</button>':''}`);
+  const f=dialog.querySelector('form'),fields=f.elements;
+  fields.amount.onchange=()=>{const old=it.grams??it.quantity??1;if(fields.unit.value===(it.grams!=null?'g':it.unit||'pz')&&old>0)fields.kcal.value=Math.round((it.kcal||0)*Number(fields.amount.value)/old)};
+  dialog.querySelector('.removeFood')?.addEventListener('click',()=>{if(confirm(`Eliminare ${it.name}?`)){c.items=c.items.filter(x=>x!==original);markDietDirty();redraw();dialog.close()}});
+  f.onsubmit=e=>{e.preventDefault();try{it.name=cleanDietName(fields.foodName.value);if(!it.name)throw new Error('Inserisci il nome.');const amount=dietNumber(fields.amount.value);if(!amount)throw new Error('La quantità deve essere maggiore di zero.');it.grams=fields.unit.value==='g'?amount:null;it.quantity=amount;it.unit=fields.unit.value;it.kcal=dietNumber(fields.kcal.value);it.department=fields.department.value;for(const [i,r] of (dietDraft.rules||[]).entries()){it.tags=(it.tags||[]).filter(t=>t!==r.tag);if(fields['tag'+i].checked)it.tags.push(r.tag)}if(original)c.items[c.items.indexOf(original)]=it;else c.items.push(it);markDietDirty();redraw();dialog.close()}catch(err){dialog.querySelector('.dialogError').textContent=err.message}};
+}
+async function saveDietEditor(){
+  const button=$('dietSave');try{
+    if(!dietDraft.meals.length)throw new Error('Aggiungi almeno un pasto.');
+    if(!(dietDraft.targetKcal>0))throw new Error('Inserisci un obiettivo kcal maggiore di zero.');
+    for(const m of dietDraft.meals){if(!m.categories.length)throw new Error(`Aggiungi una sezione a ${m.label}.`);for(const c of m.categories)if(!c.items.length)throw new Error(`Aggiungi almeno un alimento in ${m.label} / ${c.label}.`)}
+    button.disabled=true;const pid=dietPid,next=structuredClone(dietDraft),base=structuredClone(dietBase);
+    // Keep the existing tolerance around the new target.
+    const delta=next.targetKcal-base.targetKcal;next.kcalLow=(base.kcalLow||base.targetKcal)+delta;next.kcalHigh=(base.kcalHigh||base.targetKcal)+delta;
+    next.dietRevision=(base.dietRevision||0)+1;
+    await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId,'profiles',pid),snap=await tx.get(ref);if(!snap.exists()||JSON.stringify(normalizeProfile(snap.data()))!==JSON.stringify(base))throw new Error('La dieta è cambiata su un altro dispositivo. Annulla le modifiche e riapri il profilo prima di riprovare.');tx.set(doc(db,'households',householdId,'dietBackups',pid),{profile:snap.data(),savedAt:Date.now()});tx.set(ref,next)});
+    profiles[pid]=next;dietDraft=null;dietDirty=false;renderAll();scheduleSiriSync();$('dietStatus').textContent='Dieta salvata e condivisa sui vostri dispositivi.';
+  }catch(e){$('dietStatus').textContent='Salvataggio non riuscito: '+e.message}finally{button.disabled=false}
+}
+window.addEventListener('beforeunload',e=>{if(dietDirty){e.preventDefault();e.returnValue=''}});
+function shoppingBasis(x){return JSON.stringify([x.grams??null,x.count??null,x.qty??null,x.unit??null])}
+function shoppingAdjustment(x){const a=shopAdjustments[rangeCheckId(x)];return a&&a.basis===shoppingBasis(x)?a:null}
+function editShoppingQuantity(x){
+  const r=shopRange(),cid=rangeCheckId(x,r),a=shoppingAdjustment(x),amount=a?.amount??(x.extra?x.qty:x.grams>0?x.grams:x.count),unit=a?.unit??(x.extra?x.unit:x.grams>0?'g':x.unit||'pz');
+  const dialog=editorDialog('Quantità da acquistare',`<p><b>${safeText(x.name)}</b></p><p>Previsti: ${safeText(baseQty(x))}</p><div class="grid2"><label>Da comprare<input name="amount" required type="number" min="0" step="any" value="${Number(amount)||0}"></label><label>Unità<select name="unit">${[...new Set([unit,'g','kg','pz','confezioni','ml','L'])].filter(Boolean).map(u=>`<option value="${safeText(u)}" ${u===unit?'selected':''}>${safeText(u)}</option>`).join('')}</select></label></div><p class="small">Vale per ${safeText(shopRangeLabel(r))}. Non cambia la dieta o le porzioni. Se cambia il totale previsto, si torna automaticamente al calcolo della dieta.</p><button class="resetQuantity" type="button">Ripristina quantità prevista</button>`);
+  const ref=doc(db,'households',householdId,'shopAdjustments',cid),f=dialog.querySelector('form');
+  async function persist(reset){const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{if(reset){await deleteDoc(ref);delete shopAdjustments[cid]}else{const data={amount:dietNumber(f.elements.amount.value),unit:f.elements.unit.value,basis:shoppingBasis(x),key:x.key,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()};await setDoc(ref,data);shopAdjustments[cid]=data}renderShopping();dialog.close()}catch(e){dialog.querySelector('.dialogError').textContent='Salvataggio non riuscito: '+e.message;buttons.forEach(b=>b.disabled=false)}}
+  f.onsubmit=e=>{e.preventDefault();persist(false)};dialog.querySelector('.resetQuantity').onclick=()=>persist(true);
+}
+function foodAmount(it){return it.grams!=null?`${it.grams} g`:it.quantity!=null?`${it.quantity} ${it.unit||'pz'}`:''}

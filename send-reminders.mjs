@@ -9,7 +9,7 @@ for(const h of hs.docs){const hid=h.id,hdata=h.data();const members=await db.col
    const siri={householdId:hid,date:today,updatedAt:Date.now()};
    for(const [pid,p] of Object.entries(pmap)){
      const ds=(await db.doc(`households/${hid}/days/${pid}_${today}`).get()).data()||{};
-     const s=ds.summary||{};
+     const s=currentSummary(p,ds,today);
      const hasMeal=id=>(p.meals||[]).some(m=>m.id===id);
      const say=(id,label,missingText)=>{
        if(!hasMeal(id))return missingText;
@@ -34,18 +34,20 @@ for(const h of hs.docs){const hid=h.id,hdata=h.data();const members=await db.col
 
      siri[`${pid}_dinner`]=dinner;
 
-     const full=[];
-     if(hasMeal('breakfast'))full.push(breakfast);
-     if(hasMeal('morning_snack'))full.push(morningSnack);
-     if(hasMeal('lunch'))full.push(lunch);
-     if(hasMeal('snack'))full.push(afternoonSnack);
-     if(hasMeal('dinner'))full.push(dinner);
+     const full=(p.meals||[]).map(m=>`${m.label}: ${s[m.id]||'non ancora compilato'}`);
      siri[`${pid}_full`]=`${p.displayName||pid}. ${full.join('. ')}`;
    }
    await db.doc(`siriPublic/${hdata.siriToken}`).set(siri);
  }
 
  for(const md of members.docs){const m=md.data(), [hh,mm]=(m.notifyAt||'07:30').split(':').map(Number), target=hh*60+mm;let delta=cur-target;if(delta<0)delta+=1440;if(delta>35)continue;const logRef=db.doc(`households/${hid}/notificationLog/${md.id}_${today}`);if((await logRef.get()).exists)continue;const own=(await db.doc(`households/${hid}/days/${m.profileId}_${today}`).get()).data();if(!own?.summary)continue;const subs=await db.collection(`households/${hid}/pushSubscriptions`).where('uid','==',md.id).get();const appUrl=`https://${process.env.GH_OWNER}.github.io/${process.env.GH_REPO}/`;
- const messages=[];messages.push({title:`Menu di oggi — ${m.displayName}`,body:summaryText(own.summary,true),url:appUrl});if(m.includePartnerMenu){for(const [pid,p] of Object.entries(pmap)){if(pid===m.profileId)continue;const od=(await db.doc(`households/${hid}/days/${pid}_${today}`).get()).data();if(od?.summary)messages.push({title:`Menu ${p.displayName} — per cucinare`,body:summaryText(od.summary,false),url:appUrl})}}
+ const messages=[];messages.push({title:`Menu di oggi — ${m.displayName}`,body:summaryText(currentSummary(pmap[m.profileId],own,today),true,pmap[m.profileId]),url:appUrl+`?menu=${today}`});if(m.includePartnerMenu){for(const [pid,p] of Object.entries(pmap)){if(pid===m.profileId)continue;const od=(await db.doc(`households/${hid}/days/${pid}_${today}`).get()).data();if(od?.summary)messages.push({title:`Menu ${p.displayName} — per cucinare`,body:summaryText(currentSummary(p,od,today),false,p),url:appUrl+`?menu=${today}`})}}
  for(const sd of subs.docs){const sub=sd.data();for(const msg of messages){try{await webpush.sendNotification({endpoint:sub.endpoint,keys:sub.keys},JSON.stringify(msg))}catch(e){if(e.statusCode===404||e.statusCode===410)await sd.ref.delete();else console.error(e.message)}}}await logRef.set({sentAt:admin.firestore.FieldValue.serverTimestamp()});}}
-function summaryText(s,all){const map=[['breakfast','Col'],['morning_snack','Sp'],['lunch','Pr'],['snack','Mer'],['dinner','Ce']];return map.filter(([k])=>all||['lunch','dinner'].includes(k)).filter(([k])=>s[k]).map(([k,l])=>`${l}: ${s[k]}`).join(' · ').slice(0,900)}
+function currentSummary(p,d,date){
+ const result={},dow=new Date(date+'T12:00:00Z').getUTCDay();
+ for(const m of p?.meals||[]){
+  if(m.freeWeekend!==false&&((dow===6&&m.id==='dinner')||(dow===0&&m.id==='lunch'))){result[m.id]='Pasto libero';continue}
+  result[m.id]=m.categories.map(c=>{const it=c.items.find(x=>x.id===d.selections?.[c.id]);return it?`${it.name}${it.grams!=null?' '+it.grams+' g':it.quantity!=null?' '+it.quantity+' '+(it.unit||'pz'):''}`:null}).filter(Boolean).join(' + ');
+ }return result;
+}
+function summaryText(s,all,p){return (p?.meals||[]).filter(m=>all||['lunch','dinner'].includes(m.id)).filter(m=>s[m.id]).map(m=>`${m.label}: ${s[m.id]}`).join(' · ').slice(0,900)}
