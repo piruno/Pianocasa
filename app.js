@@ -998,7 +998,7 @@ async function saveDietEditor(){
     // Keep the existing tolerance around the new target.
     const delta=next.targetKcal-base.targetKcal;next.kcalLow=(base.kcalLow||base.targetKcal)+delta;next.kcalHigh=(base.kcalHigh||base.targetKcal)+delta;
     next.dietRevision=(base.dietRevision||0)+1;
-    await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId,'profiles',pid),snap=await tx.get(ref);if(!snap.exists()||JSON.stringify(normalizeProfile(snap.data()))!==JSON.stringify(base))throw new Error('La dieta è cambiata su un altro dispositivo. Annulla le modifiche e riapri il profilo prima di riprovare.');tx.set(doc(db,'households',householdId,'dietBackups',pid),{profile:snap.data(),savedAt:Date.now()});tx.set(ref,next)});
+    await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId,'profiles',pid),snap=await tx.get(ref);if(!snap.exists()||dietFingerprint(normalizeProfile(snap.data()))!==dietFingerprint(base))throw new Error('La versione salvata della dieta è cambiata da quando hai aperto l’editor. Annota le modifiche, poi premi Annulla modifiche per caricare la versione aggiornata e riprova.');tx.set(doc(db,'households',householdId,'dietBackups',pid),{profile:snap.data(),savedAt:Date.now()});tx.set(ref,next)});
     profiles[pid]=next;dietDraft=null;dietDirty=false;renderAll();scheduleSiriSync();$('dietStatus').textContent='Dieta salvata e condivisa sui vostri dispositivi.';
   }catch(e){$('dietStatus').textContent='Salvataggio non riuscito: '+e.message}finally{button.disabled=false}
 }
@@ -1013,3 +1013,10 @@ function editShoppingQuantity(x){
   f.onsubmit=e=>{e.preventDefault();persist(false)};dialog.querySelector('.resetQuantity').onclick=()=>persist(true);
 }
 function foodAmount(it){return it.grams!=null?`${it.grams} g`:it.quantity!=null?`${it.quantity} ${it.unit||'pz'}`:''}
+
+// Firestore map key order is not meaningful. Array order (meals/items) is.
+function dietFingerprint(value){
+  if(Array.isArray(value))return '['+value.map(dietFingerprint).join(',')+']';
+  if(value!==null&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+dietFingerprint(value[key])).join(',')+'}';
+  return JSON.stringify(value);
+}
