@@ -5,6 +5,7 @@ const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
 let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
 let dietDraft=null,dietBase=null,dietPid=null,dietDirty=false,shopAdjustments={};
+let extraTargetRange=null;
 let lastPlanningPeriodId=null,periodFormDirty=false,periodWritePending=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
@@ -86,7 +87,7 @@ async function startApp(){
   listeners.push(onSnapshot(collection(db,'households',householdId,'shopAdjustments'),s=>{shopAdjustments={};s.forEach(x=>shopAdjustments[x.id]=x.data());renderShopping()}));
   renderMember();setupAlphaIndex();syncShopPeriodControls();
 }
-function renderAll(){applyPlanningPeriod();renderPlanningPeriod();if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty&&!document.querySelector('dialog.editorDialog[open]')){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
+function renderAll(){applyPlanningPeriod();renderPlanningPeriod();if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty&&!document.querySelector('dialog.editorDialog[open]')){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
 function tab(id){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
@@ -157,6 +158,7 @@ function renderToday(){
   const usage=foodUsageUntil(currentDate),bounds=planBounds();$('prevDay').disabled=currentDate<=bounds.from;$('nextDay').disabled=currentDate>=bounds.to;
   $('usagePeriodHint').textContent=`Conteggi: scelte dal ${fmt(bounds.from,true)} al ${fmt(currentDate,true)}, giorno incluso. Non indicano le scorte in casa.`;
   const d=dayDoc(p.id,currentDate),missing=missingCategories(p,d),total=totalKcal(p,d);
+  $('todayDateSelect').innerHTML=datesBetween(bounds.from,bounds.to).map(date=>`<option value="${date}" ${date===currentDate?'selected':''}>${safeText(fmt(date,true))}</option>`).join('');
   $('todayTitle').textContent=fmt(currentDate);$('profileLabel').textContent=p.displayName;
   $('kcalTotal').textContent=total;$('kcalBar').style.width=Math.min(100,total/p.targetKcal*100)+'%';
   const ks=$('kcalState');ks.className='pill';
@@ -274,11 +276,13 @@ $('copyFirstWeek').onclick=async()=>{
   alert(`Copiati ${n} giorni nella seconda settimana.`);
 };
 $('clearDay').onclick=async()=>{if(confirm('Azzero questo giorno?'))await deleteDoc(doc(db,'households',householdId,'days',`${currentProfileId}_${currentDate}`))};
-function renderCalendar(){const p=profiles[currentProfileId];if(!p)return;const range=planBounds();const box=$('calendarDays');box.innerHTML='';for(const date of datesBetween(range.from,range.to)){const d=dayDoc(p.id,date),miss=missingCategories(p,d).length,totalCats=activeCats(p,date).length,free=hasFreeMeal(p,date),row=document.createElement('div');row.className='dayrow';row.innerHTML=`<button><b>${fmt(date)}</b><div class="muted">${miss?`mancano ${miss} scelte su ${totalCats}`:`${totalKcal(p,d)} kcal${free?' + pasto libero':''} · tutte le sezioni complete`}</div></button><span class="pill ${miss?'warn':'good'}">${miss?'incompleto':'completo'}</span>`;row.querySelector('button').onclick=()=>{setCurrentDate(date);tab('today')};box.appendChild(row)}}
-$('savePeriod').onclick=createPlanningPeriod;
+$('planningPeriodForm').onsubmit=e=>{e.preventDefault();createPlanningPeriod()};
 for(const id of ['startDate','endDate'])$(id).addEventListener('input',()=>{periodFormDirty=true});
 $('planningPeriodSelect').onchange=e=>activatePlanningPeriod(e.target.value);
-$('newPlanningPeriod').onclick=()=>{tab('calendar');$('startDate').focus();$('startDate').scrollIntoView({block:'center',behavior:'smooth'})};
+$('newPlanningPeriod').onclick=openPlanningPeriodDialog;
+$('cancelPlanningPeriod').onclick=()=>$('planningPeriodDialog').close();
+$('planningPeriodDialog').addEventListener('close',()=>{periodFormDirty=false});
+$('todayDateSelect').onchange=e=>setCurrentDate(e.target.value);
 function normalizeName(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
 function legacyPlanBounds(){
   const ps=Object.values(profiles).filter(p=>p.startDate&&p.endDate);
@@ -328,7 +332,7 @@ function collectShop(range=shopRange()){
   }
   return [...map.values()]
 }
-function allShopItems(range=shopRange()){return collectShop(range).concat(extras.filter(e=>extraInPeriod(e,range.periodId||activePlanningPeriod().id)).map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
+function allShopItems(range=shopRange()){return collectShop(range).concat(extras.filter(e=>extraInPeriod(e,range)).map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
 function qty(x){const adj=shoppingAdjustment(x);if(adj)return `${Number(adj.amount).toLocaleString('it-IT')} ${adj.unit}`;return baseQty(x)}
 function baseQty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
 const PIECE_WEIGHTS={
@@ -526,8 +530,9 @@ $('cancelAisle')?.addEventListener('click',()=>$('aisleModal').classList.add('hi
 $('saveAisle')?.addEventListener('click',async()=>{const name=$('aisleModal').dataset.itemName,v=$('aisleSelect').value,ref=doc(db,'households',householdId,'storeMappings',mappingDocId(name));if(v==='AUTO')await deleteDoc(ref);else await setDoc(ref,{storeId:TOSANO_STORE_ID,name,aisle:v,updatedAt:Date.now()});$('aisleModal').classList.add('hidden')});
 $('shopSort').onchange=()=>{alphaPeek=null;renderShopping()};
 $('hideChecked').onclick=()=>{hideDone=!hideDone;$('hideChecked').textContent='Nascondi presi: '+(hideDone?'SÌ':'NO');renderShopping()};
-$('addExtra').onclick=()=>$('modal').classList.remove('hidden');$('cancelExtra').onclick=()=>$('modal').classList.add('hidden');
-$('saveExtra').onclick=async()=>{const name=$('extraName').value.trim();if(!name)return;const ref=doc(collection(db,'households',householdId,'extras'));await setDoc(ref,{name,qty:Number($('extraQty').value||1),unit:$('extraUnit').value.trim()||'pz',department:$('extraDept').value,createdAt:Date.now(),periodId:activePlanningPeriod().id});$('modal').classList.add('hidden');$('extraName').value=''};
+$('addExtra').onclick=openExtraModal;
+$('cancelExtra').onclick=()=>{$('modal').classList.add('hidden');extraTargetRange=null};
+$('saveExtra').onclick=saveExtraForPeriod;
 $('shareShop').onclick=async()=>{const r=shopRange(),arr=allShopItems(r);const text=['LISTA DELLA SPESA',shopRangeLabel(r),'',...arr.map(x=>`• ${x.name}: ${qty(x)}${approxPieces(x)?' · '+approxPieces(x):''}${x.extra?' [EXTRA]':''}`)].join('\n');if(navigator.share)try{await navigator.share({title:'Spesa PianoCasa',text})}catch{}else{await navigator.clipboard.writeText(text);alert('Lista copiata')}};
 for(const id of ['shopPeriod','portionPeriod'])$(id)?.addEventListener('change',e=>setShopPeriod(e.target.value));
 for(const prefix of ['shop','portion']){
@@ -1077,7 +1082,7 @@ async function createPlanningPeriod(){
     appendPlanningPeriod(householdDoc,legacy,period);periodWritePending=true;button.disabled=true;renderPlanningPeriod();
     let saved;
     await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId),s=await tx.get(ref);if(!s.exists())throw new Error('Famiglia non trovata.');const house=s.data();const list=appendPlanningPeriod(house,legacy,period);saved={...house,planningPeriods:list,activePlanningPeriodId:period.id};tx.update(ref,{planningPeriods:list,activePlanningPeriodId:period.id})});
-    householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';tab('today');window.scrollTo({top:0,behavior:'smooth'});
+    householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';$('planningPeriodDialog').close();window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){$('periodMessage').textContent='Periodo non creato: '+e.message}finally{periodWritePending=false;button.disabled=false;renderPlanningPeriod()}
 }
 async function activatePlanningPeriod(id){
@@ -1087,7 +1092,14 @@ async function activatePlanningPeriod(id){
   try{await updateDoc(doc(db,'households',householdId),{activePlanningPeriodId:id});householdDoc.activePlanningPeriodId=id;periodFormDirty=false;renderAll()}
   catch(e){alert('Cambio periodo non salvato: '+e.message)}finally{periodWritePending=false;renderPlanningPeriod()}
 }
-function extraInPeriod(extra,periodId){return extra.periodId?extra.periodId===periodId:isLegacyPeriod(periodId)}
+function extraInPeriod(extra,range=shopRange()){
+  const r=typeof range==='string'?{...shopRange(),periodId:range}:range;
+  if(!extra.periodId||extra.periodId!==r.periodId)return false;
+  if(extra.rangeFrom&&extra.rangeTo)return extra.rangeFrom===r.from&&extra.rangeTo===r.to;
+  // v18 extras without a subrange belong only to their complete saved period.
+  const period=planningPeriods().find(p=>p.id===extra.periodId);
+  return !!period&&r.from===period.from&&r.to===period.to;
+}
 
 // Counts are planned selections, not inferred package sizes or household stock.
 function foodUsageUntil(date){
@@ -1151,4 +1163,24 @@ function addDietCategory(meal){
   const draw=()=>{const t=templates[Number(select.value)];preview.innerHTML=t?`<b>${safeText(t.category.label)}</b><ul>${t.category.items.map(it=>`<li>${safeText(it.name)} · ${safeText(foodAmount(it))}</li>`).join('')}</ul>`:'Nessuna sezione da copiare. Puoi crearne una vuota.'};draw();select.onchange=draw;
   dialog.querySelector('.manualCategory').onclick=()=>{manual=!manual;select.disabled=manual;preview.classList.toggle('hidden',manual);dialog.querySelector('.manualCategoryName').classList.toggle('hidden',!manual);form.elements.categoryName.required=manual;dialog.querySelector('.manualCategory').textContent=manual?'Torna alle sezioni esistenti':'Crea una sezione vuota manualmente';if(manual)form.elements.categoryName.focus()};
   form.onsubmit=e=>{e.preventDefault();try{let category;if(manual){const label=cleanDietName(form.elements.categoryName.value);if(!label)throw new Error('Inserisci un nome per la sezione.');category={id:newDietId(),label,items:[]}}else{const template=templates[Number(select.value)];if(!template)throw new Error('Scegli una sezione oppure creala manualmente.');category=cloneDietCategory(template,dietDraft)}meal.categories.push(category);dietDirty=true;renderDietEditor();dialog.close()}catch(err){dialog.querySelector('.dialogError').textContent=err.message}};
+}
+
+function openPlanningPeriodDialog(){
+  const period=activePlanningPeriod();$('startDate').value=addDays(period.to,1);$('endDate').value=addDays(period.to,14);
+  $('periodMessage').textContent='';periodFormDirty=true;$('planningPeriodDialog').showModal();
+}
+function openExtraModal(){
+  extraTargetRange=structuredClone(shopRange());$('extraPeriodLabel').textContent='Solo per questa spesa: '+shopRangeLabel(extraTargetRange);
+  $('extraName').value='';$('extraQty').value='1';$('extraUnit').value='pz';$('extraError').textContent='';$('modal').classList.remove('hidden');$('extraName').focus();
+}
+async function saveExtraForPeriod(){
+  const button=$('saveExtra');
+  try{
+    const name=cleanDietName($('extraName').value);if(!name)throw new Error('Inserisci il nome dell’extra.');
+    const range=structuredClone(extraTargetRange);if(!range?.periodId)throw new Error('Riapri Aggiungi EXTRA nel periodo desiderato.');
+    const amount=dietNumber($('extraQty').value);if(amount<=0)throw new Error('Inserisci una quantità maggiore di zero.');
+    button.disabled=true;const ref=doc(collection(db,'households',householdId,'extras'));
+    await setDoc(ref,{name,qty:amount,unit:cleanDietName($('extraUnit').value)||'pz',department:$('extraDept').value,createdAt:Date.now(),periodId:range.periodId,rangeFrom:range.from,rangeTo:range.to});
+    $('modal').classList.add('hidden');extraTargetRange=null;
+  }catch(e){$('extraError').textContent='Extra non salvato: '+e.message}finally{button.disabled=false}
 }

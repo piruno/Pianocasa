@@ -209,3 +209,6 @@ header{position:relative;top:auto;z-index:1}
 @media(max-width:560px){.chosenRow{grid-template-columns:minmax(0,1fr) 84px}.chosenRow .changeChoice{grid-column:1 / -1;justify-self:end}.opt{grid-template-columns:minmax(0,1fr) 76px}.foodUsage{font-size:10px;padding:6px}.planningBar .grid2{grid-template-columns:1fr}.planningBar input,.planningBar select{font-size:16px}}
 
 .chosenRow .removeOneOff{grid-column:1 / -1;justify-self:start;font-size:11px}.oneOffConsent{background:#fff7ed;padding:8px;border-radius:10px}.templatePreview ul{margin-bottom:0}
+
+/* v18.1 */
+.todayDatePicker{margin:12px 0 4px}.todayDatePicker select{font-size:16px;margin-top:4px}#planningPeriodDialog p{line-height:1.5;font-size:13px}#planningPeriodDialog input{min-width:0;max-width:100%;font-size:16px}#extraPeriodLabel{line-height:1.5;color:#0f766e}
