@@ -5,6 +5,7 @@ const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
 let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
 let dietDraft=null,dietBase=null,dietPid=null,dietDirty=false,shopAdjustments={};
+let lastPlanningPeriodId=null,periodFormDirty=false,periodWritePending=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
 let shopRangeMode='all',shopCustomStart='',shopCustomEnd='',alphaPeek=null,shoppingModeOpen=false,alphaResultLetter=null,alphaReturnScroll=0;
@@ -59,7 +60,7 @@ function normalizeProfile(raw){
 }
 function itemMap(p){const m={};for(const meal of p.meals)for(const c of meal.categories)for(const it of c.items)m[it.id]=it;return m}
 function dayDoc(pid,date){return days.find(x=>x.profileId===pid&&x.date===date)||{profileId:pid,date,selections:{},consumed:{}}}
-function selectedItem(p,d,c){const id=d.selections?.[c.id];return id?c.items.find(x=>x.id===id):null}
+function selectedItem(p,d,c){const id=d.selections?.[c.id];if(!id)return null;const once=d.oneOffs?.[c.id];return once?.id===id?once:c.items.find(x=>x.id===id)||null}
 function totalKcal(p,d){let t=0;for(const c of activeCats(p,d.date)){const i=selectedItem(p,d,c);if(i)t+=i.kcal}return t}
 function complete(p,d){return activeCats(p,d.date).every(c=>selectedItem(p,d,c))}
 function show(id){['authLoadingView','authView','onboardView','appView'].forEach(x=>$(x)?.classList.toggle('hidden',x!==id));$('signoutBtn').classList.toggle('hidden',id!=='appView')}
@@ -75,7 +76,7 @@ async function startApp(){
   show('appView');
   const ms=await getDoc(doc(db,'households',householdId,'members',user.uid));
   member=ms.data();currentProfileId=currentProfileId||member.profileId;
-  listeners.push(onSnapshot(doc(db,'households',householdId),s=>{householdDoc=s.data()||{};renderSiriSettings();scheduleSiriSync()}));
+  listeners.push(onSnapshot(doc(db,'households',householdId),s=>{householdDoc=s.data()||{};applyPlanningPeriod();renderAll();renderSiriSettings();scheduleSiriSync()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll();scheduleSiriSync()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll();scheduleSiriSync()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping();renderPortions()}));
@@ -85,19 +86,19 @@ async function startApp(){
   listeners.push(onSnapshot(collection(db,'households',householdId,'shopAdjustments'),s=>{shopAdjustments={};s.forEach(x=>shopAdjustments[x.id]=x.data());renderShopping()}));
   renderMember();setupAlphaIndex();syncShopPeriodControls();
 }
-function renderAll(){if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
+function renderAll(){applyPlanningPeriod();renderPlanningPeriod();if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderCalendar();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty&&!document.querySelector('dialog.editorDialog[open]')){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
 function tab(id){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===id));
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
-  if(id==='diet')renderDietEditor();
+  if(id==='diet'){if(!dietDirty)dietDraft=null;renderDietEditor();}
   if(id==='shopping')renderShopping();
   if(id==='portions')renderPortions();
   if(id==='history')renderHistory();
   renderAlphaIndex();
 }
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
-function renderProfileSelect(){const s=$('profileSelect');if(!s)return;s.innerHTML='';Object.values(profiles).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.displayName;o.selected=p.id===currentProfileId;s.appendChild(o)});s.onchange=()=>{currentProfileId=s.value;const p=profiles[currentProfileId];currentDate=p.startDate||isoToday();renderAll()}}
-async function saveDay(pid,date,d){const p=profiles[pid];d.summary=buildSummary(p,d);d.kcal=totalKcal(p,d);d.updatedAt=Date.now();await setDoc(doc(db,'households',householdId,'days',`${pid}_${date}`),d,{merge:true})}
+function renderProfileSelect(){const s=$('profileSelect');if(!s)return;s.innerHTML='';Object.values(profiles).forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.displayName;o.selected=p.id===currentProfileId;s.appendChild(o)});s.onchange=()=>{currentProfileId=s.value;const p=profiles[currentProfileId];renderAll()}}
+async function saveDay(pid,date,d){const p=profiles[pid];d=structuredClone(d);d.profileId=pid;d.date=date;d.oneOffs||={};d.summary=buildSummary(p,d);d.kcal=totalKcal(p,d);d.updatedAt=Date.now();await setDoc(doc(db,'households',householdId,'days',`${pid}_${date}`),d,{mergeFields:Object.keys(d)});const index=days.findIndex(x=>x.profileId===pid&&x.date===date);if(index<0)days.push(d);else days[index]=d;renderAll();scheduleSiriSync()}
 function buildSummary(p,d){const out={};for(const meal of p.meals){if(isFreeMeal(d.date,meal)){out[meal.id]='Pasto libero';continue}let arr=[];for(const c of meal.categories){const it=selectedItem(p,d,c);if(it)arr.push(`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}`)}out[meal.id]=arr.join(' + ')}return out}
 function mealTotal(p,d,m){if(isFreeMeal(d.date,m))return 0;let t=0;for(const c of m.categories){const i=selectedItem(p,d,c);if(i)t+=i.kcal}return t}
 function missingCategories(p,d){const out=[];for(const meal of p.meals){if(isFreeMeal(d.date,meal))continue;for(const c of meal.categories)if(!selectedItem(p,d,c))out.push({meal,c})}return out}
@@ -117,7 +118,7 @@ function nextMissingCategory(p,d,currentCatId){
   for(let i=0;i<=start;i++)if(!selectedItem(p,d,cats[i]))return cats[i];
   return null;
 }
-function setCurrentDate(date){currentDate=date;expandedCats.clear();scrollAfterRender=null;renderToday()}
+function setCurrentDate(date){const b=planBounds();currentDate=date<b.from?b.from:date>b.to?b.to:date;expandedCats.clear();scrollAfterRender=null;renderToday()}
 function scrollToCategory(id){
   if(!id)return;
   requestAnimationFrame(()=>setTimeout(()=>{
@@ -153,6 +154,8 @@ function partnerChoiceFor(p,meal,c,date){
 }
 function renderToday(){
   const p=profiles[currentProfileId];if(!p)return;
+  const usage=foodUsageUntil(currentDate),bounds=planBounds();$('prevDay').disabled=currentDate<=bounds.from;$('nextDay').disabled=currentDate>=bounds.to;
+  $('usagePeriodHint').textContent=`Conteggi: scelte dal ${fmt(bounds.from,true)} al ${fmt(currentDate,true)}, giorno incluso. Non indicano le scorte in casa.`;
   const d=dayDoc(p.id,currentDate),missing=missingCategories(p,d),total=totalKcal(p,d);
   $('todayTitle').textContent=fmt(currentDate);$('profileLabel').textContent=p.displayName;
   $('kcalTotal').textContent=total;$('kcalBar').style.width=Math.min(100,total/p.targetKcal*100)+'%';
@@ -203,10 +206,12 @@ function renderToday(){
         <div class="choiceTitle"><div class="choiceKicker">SEZIONE ${idx+1} DI ${meal.categories.length}</div><div class="choiceLabel">${meta.icon} ${c.label}</div><div class="choiceHint">${chosen?'Scelta effettuata':'Scegli 1 alternativa'}</div></div>
         <div class="choiceStatus ${chosen?'ok':'todo'}">${chosen?'✓ COMPLETA':'DA SCEGLIERE'}</div>
       </div>
-      ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${foodAmount(chosen)?' — '+foodAmount(chosen):''}</b><small>${chosen.kcal} kcal</small></div><button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button></div>`:''}
-      ${partnerPick?.item&&!partnerPick.common?`<div class="partnerNotice notCommon"><span class="partnerAvatar">👥</span><div><b>${partnerPick.partner.displayName} ha scelto ${partnerPick.item.name}${foodAmount(partnerPick.item)?' — '+foodAmount(partnerPick.item):''}</b><small>ALIMENTO NON IN COMUNE: non compare tra le tue alternative.</small></div></div>`:''}
+      ${chosen?`<div class="chosenRow"><div><b>${chosen.name}${foodAmount(chosen)?' — '+foodAmount(chosen):''}</b><small>${chosen.kcal} kcal${d.oneOffs?.[c.id]?.id===chosen.id?' · SOLO PER QUESTO GIORNO':''}</small></div>${foodUsageMarkup(chosen,usage)}<button class="changeChoice">${isOpen?'Chiudi':'Cambia'}</button>${d.oneOffs?.[c.id]?.id===chosen.id?'<button class="removeOneOff danger">Annulla eccezione</button>':''}</div>`:''}
+      ${partnerPick?.item&&!partnerPick.common?`<div class="partnerNotice notCommon"><span class="partnerAvatar">👥</span><div><b>${partnerPick.partner.displayName} ha scelto ${partnerPick.item.name}${foodAmount(partnerPick.item)?' — '+foodAmount(partnerPick.item):''}</b><small>ALIMENTO NON IN COMUNE: non compare tra le tue alternative.</small><button class="choosePartnerOnce">Scegli anch’io · solo questo giorno</button></div></div>`:''}
       <div class="options ${isOpen?'':'collapsed'}"></div>`;
       const opts=box.querySelector('.options');
+      box.querySelector('.removeOneOff')?.addEventListener('click',async()=>{const date=currentDate,next=structuredClone(dayDoc(p.id,date));delete next.selections[c.id];delete next.oneOffs[c.id];expandedCats.add(c.id);try{await saveDay(p.id,date,next)}catch(e){alert('Modifica non salvata: '+e.message)}});
+      box.querySelector('.choosePartnerOnce')?.addEventListener('click',()=>choosePartnerOnce(p,c,currentDate,partnerPick));
 
       if(chosen){
         box.querySelector('.changeChoice').onclick=()=>{
@@ -221,18 +226,18 @@ function renderToday(){
         const sel=d.selections?.[c.id]===it.id;if(sel)b.classList.add('selected');
         const partnerSelected=!!(partnerPick?.common&&partnerPick.matchId===it.id);if(partnerSelected)b.classList.add('partnerSelected');
         const block=blockedReason(p,currentDate,c.id,it.id,d);b.disabled=!sel&&!!block;
-        b.innerHTML=`${it.name}${foodAmount(it)?' — '+foodAmount(it):''}<small>${it.kcal} kcal</small>${partnerSelected?`<span class="partnerPickBadge">👥 ${partnerPick.partner.displayName} ha scelto questo${foodAmount(partnerPick.item)?' · '+foodAmount(partnerPick.item):''}</span>`:''}${block&&!sel?`<span class="limit">${block}</span>`:''}`;
+        b.innerHTML=`<span class="foodOptionText">${safeText(it.name)}${foodAmount(it)?' — '+foodAmount(it):''}<small>${it.kcal} kcal</small>${partnerSelected?`<span class="partnerPickBadge">👥 ${partnerPick.partner.displayName} ha scelto questo${foodAmount(partnerPick.item)?' · '+foodAmount(partnerPick.item):''}</span>`:''}${block&&!sel?`<span class="limit">${safeText(block)}</span>`:''}</span>${foodUsageMarkup(it,usage)}`;
         b.onclick=async()=>{
           if(sel){expandedCats.delete(c.id);renderToday();return}
-          const nd=structuredClone(dayDoc(p.id,currentDate));nd.selections||={};
-          const wasMissing=!selectedItem(p,d,c);nd.selections[c.id]=it.id;
+          const date=currentDate,nd=structuredClone(dayDoc(p.id,date));nd.selections||={};
+          const wasMissing=!selectedItem(p,d,c);nd.selections[c.id]=it.id;nd.oneOffs||={};delete nd.oneOffs[c.id];
           expandedCats.delete(c.id);
           if(wasMissing){
             const next=nextMissingCategory(p,nd,c.id);
             if(next){expandedCats.add(next.id);scrollAfterRender=next.id}
             else if(missingCategories(p,nd).length===0){scrollAfterRender='__TOP__'}
           }
-          await saveDay(p.id,currentDate,nd);
+          b.disabled=true;try{await saveDay(p.id,date,nd)}catch(e){alert('Scelta non salvata: '+e.message);renderToday()}
         };
         opts.appendChild(b)
       }
@@ -250,41 +255,50 @@ function renderToday(){
     else scrollToCategory(id);
   }
 }
-function selectedOccurrences(p,tag,excludeDate=null,excludeCat=null){const im=itemMap(p), arr=[];for(const d of days.filter(x=>x.profileId===p.id)){for(const [cat,id] of Object.entries(d.selections||{})){if(d.date===excludeDate&&cat===excludeCat)continue;const meal=mealForCat(p,cat);if(meal&&isFreeMeal(d.date,meal))continue;const it=im[id];if(it?.tags?.includes(tag))arr.push(d.date)}}return arr}
-function violatesRolling(existing,candidate,maxCount,windowDays){const a=[...existing,candidate].sort();for(let i=0;i<a.length;i++){let c=0;const start=parseISO(a[i]);for(let j=i;j<a.length;j++){const diff=(parseISO(a[j])-start)/86400000;if(diff<=windowDays-1)c++;else break}if(c>maxCount)return true}return false}
-function blockedReason(p,date,catId,itemId,d){const it=itemMap(p)[itemId];if(!it)return'';for(const r of p.rules||[]){if(r.disabledWhen&&p.conditions?.[r.disabledWhen]&&it.tags?.includes(r.tag))return r.label+' non disponibile';if(r.maxCount&&it.tags?.includes(r.tag)){const occ=selectedOccurrences(p,r.tag,date,catId);if(violatesRolling(occ,date,r.maxCount,r.days||7))return `limite ${r.maxCount} ogni ${r.days||7} giorni`}}return''}
-function minimumInfo(p,date){let txt=[];for(const r of p.minimums||[]){const from=addDays(date,-6),to=date;const im=itemMap(p);let n=0;for(const d of days.filter(x=>x.profileId===p.id&&x.date>=from&&x.date<=to))for(const [cat,id] of Object.entries(d.selections||{})){const meal=mealForCat(p,cat);if(meal&&isFreeMeal(d.date,meal))continue;if(im[id]?.tags?.includes(r.tag))n++}txt.push(`${r.label}: ${n}/${r.minCount} minimo negli ultimi 7 giorni`)}return txt.join(' · ')}
+function selectedOccurrences(p,tag,excludeDate=null,excludeCat=null){const arr=[];for(const d of days.filter(x=>x.profileId===p.id))for(const c of activeCats(p,d.date)){if(d.date===excludeDate&&c.id===excludeCat)continue;if(selectedItem(p,d,c)?.tags?.includes(tag))arr.push(d.date)}return arr}
+function violatesRolling(existing,candidate,maxCount,windowDays){
+  const nearby=existing.filter(date=>date>=addDays(candidate,1-windowDays)&&date<=addDays(candidate,windowDays-1));
+  const starts=new Set([candidate,...nearby.filter(date=>date<=candidate)]);
+  for(const start of starts){const end=addDays(start,windowDays-1);if(candidate<=end&&nearby.filter(date=>date>=start&&date<=end).length+1>maxCount)return true}return false;
+}
+function itemLimitReason(p,date,catId,it){for(const r of p.rules||[]){if(!it.tags?.includes(r.tag))continue;if(r.disabledWhen&&p.conditions?.[r.disabledWhen])return r.label+' non disponibile';if(r.maxCount&&violatesRolling(selectedOccurrences(p,r.tag,date,catId),date,r.maxCount,r.days||7))return `limite ${r.maxCount} ogni ${r.days||7} giorni`}return ''}
+function blockedReason(p,date,catId,itemId,d){const c=allCats(p).find(x=>x.id===catId),it=c?.items.find(x=>x.id===itemId);return it?itemLimitReason(p,date,catId,it):''}
+function minimumInfo(p,date){const txt=[];for(const r of p.minimums||[]){const from=addDays(date,1-(r.days||7));const n=selectedOccurrences(p,r.tag).filter(x=>x>=from&&x<=date).length;txt.push(`${r.label}: ${n}/${r.minCount} minimo negli ultimi ${r.days||7} giorni`)}return txt.join(' · ')}
 $('prevDay').onclick=()=>setCurrentDate(addDays(currentDate,-1));$('nextDay').onclick=()=>setCurrentDate(addDays(currentDate,1));
 $('copyFirstWeek').onclick=async()=>{
-  const p=profiles[currentProfileId];if(!p?.startDate)return;
-  const target=addDays(p.startDate,7);
-  if(p.endDate&&target>p.endDate){alert('Il periodo non contiene una seconda settimana completa.');return}
+  const p=profiles[currentProfileId];if(!p)return;const range=planBounds();
+  const target=addDays(range.from,7);
+  if(target>range.to){alert('Il periodo non contiene una seconda settimana completa.');return}
   if(!confirm(`Copiare i primi 7 giorni di ${p.displayName} nella seconda settimana?`))return;
-  const n=await copyWeekForProfiles([p.id],p.startDate,target);
+  const n=await copyWeekForProfiles([p.id],range.from,target,range.to);
   alert(`Copiati ${n} giorni nella seconda settimana.`);
 };
 $('clearDay').onclick=async()=>{if(confirm('Azzero questo giorno?'))await deleteDoc(doc(db,'households',householdId,'days',`${currentProfileId}_${currentDate}`))};
-function renderCalendar(){const p=profiles[currentProfileId];if(!p)return;$('startDate').value=p.startDate||'';$('endDate').value=p.endDate||'';const box=$('calendarDays');box.innerHTML='';for(const date of datesBetween(p.startDate,p.endDate)){const d=dayDoc(p.id,date),miss=missingCategories(p,d).length,totalCats=activeCats(p,date).length,free=hasFreeMeal(p,date),row=document.createElement('div');row.className='dayrow';row.innerHTML=`<button><b>${fmt(date)}</b><div class="muted">${miss?`mancano ${miss} scelte su ${totalCats}`:`${totalKcal(p,d)} kcal${free?' + pasto libero':''} · tutte le sezioni complete`}</div></button><span class="pill ${miss?'warn':'good'}">${miss?'incompleto':'completo'}</span>`;row.querySelector('button').onclick=()=>{setCurrentDate(date);tab('today')};box.appendChild(row)}}
-$('savePeriod').onclick=async()=>{const p=profiles[currentProfileId],s=$('startDate').value,e=$('endDate').value;if(!s||!e||s>e){alert('Controlla le date');return}await updateDoc(doc(db,'households',householdId,'profiles',p.id),{startDate:s,endDate:e});currentDate=s};
+function renderCalendar(){const p=profiles[currentProfileId];if(!p)return;const range=planBounds();const box=$('calendarDays');box.innerHTML='';for(const date of datesBetween(range.from,range.to)){const d=dayDoc(p.id,date),miss=missingCategories(p,d).length,totalCats=activeCats(p,date).length,free=hasFreeMeal(p,date),row=document.createElement('div');row.className='dayrow';row.innerHTML=`<button><b>${fmt(date)}</b><div class="muted">${miss?`mancano ${miss} scelte su ${totalCats}`:`${totalKcal(p,d)} kcal${free?' + pasto libero':''} · tutte le sezioni complete`}</div></button><span class="pill ${miss?'warn':'good'}">${miss?'incompleto':'completo'}</span>`;row.querySelector('button').onclick=()=>{setCurrentDate(date);tab('today')};box.appendChild(row)}}
+$('savePeriod').onclick=createPlanningPeriod;
+for(const id of ['startDate','endDate'])$(id).addEventListener('input',()=>{periodFormDirty=true});
+$('planningPeriodSelect').onchange=e=>activatePlanningPeriod(e.target.value);
+$('newPlanningPeriod').onclick=()=>{tab('calendar');$('startDate').focus();$('startDate').scrollIntoView({block:'center',behavior:'smooth'})};
 function normalizeName(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim()}
-function planBounds(){
+function legacyPlanBounds(){
   const ps=Object.values(profiles).filter(p=>p.startDate&&p.endDate);
   if(!ps.length)return{from:isoToday(),to:addDays(isoToday(),13)};
   return{from:ps.map(p=>p.startDate).sort()[0],to:ps.map(p=>p.endDate).sort().at(-1)}
 }
+function planBounds(){const p=activePlanningPeriod();return{from:p.from,to:p.to,periodId:p.id}}
 function shopRange(){
   const b=planBounds();let from=b.from,to=b.to;
-  if(shopRangeMode==='week1'){from=b.from;to=addDays(from,6)}
+  if(shopRangeMode==='week1')to=addDays(from,6);
   else if(shopRangeMode==='week2'){from=addDays(b.from,7);to=addDays(from,6)}
   else if(shopRangeMode==='custom'){from=shopCustomStart||b.from;to=shopCustomEnd||b.to}
-  if(from<b.from)from=b.from;if(to>b.to)to=b.to;if(from>to)to=from;
-  return{from,to}
+  from=from<b.from?b.from:from>b.to?b.to:from;to=to>b.to?b.to:to<b.from?b.from:to;if(from>to)to=from;
+  return{from,to,periodId:b.periodId}
 }
 function shopRangeLabel(r=shopRange()){return `${fmt(r.from,true)} → ${fmt(r.to,true)}`}
-function dateInProfileRange(p,date,r){return date>=r.from&&date<=r.to&&(!p.startDate||date>=p.startDate)&&(!p.endDate||date<=p.endDate)}
-function intersectionDays(p,r){if(!p.startDate||!p.endDate)return 0;const a=p.startDate>r.from?p.startDate:r.from,b=p.endDate<r.to?p.endDate:r.to;return datesBetween(a,b).length}
+function dateInProfileRange(p,date,r){return date>=r.from&&date<=r.to}
+function intersectionDays(p,r){return datesBetween(r.from,r.to).length}
 function syncShopPeriodControls(){
-  for(const id of ['shopPeriod','portionPeriod'])if($(id))$(id).value=shopRangeMode;
+  for(const id of ['shopPeriod','portionPeriod'])if($(id)){$(id).value=shopRangeMode;const opt=$(id).querySelector('option[value=week2]');if(opt)opt.disabled=addDays(planBounds().from,7)>planBounds().to;}
   for(const prefix of ['shop','portion']){
     const wrap=$(prefix+'CustomRange');if(wrap)wrap.classList.toggle('hidden',shopRangeMode!=='custom');
     const s=$(prefix+'CustomStart'),e=$(prefix+'CustomEnd');if(s)s.value=shopCustomStart||planBounds().from;if(e)e.value=shopCustomEnd||planBounds().to;
@@ -314,7 +328,7 @@ function collectShop(range=shopRange()){
   }
   return [...map.values()]
 }
-function allShopItems(range=shopRange()){return collectShop(range).concat(extras.map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
+function allShopItems(range=shopRange()){return collectShop(range).concat(extras.filter(e=>extraInPeriod(e,range.periodId||activePlanningPeriod().id)).map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
 function qty(x){const adj=shoppingAdjustment(x);if(adj)return `${Number(adj.amount).toLocaleString('it-IT')} ${adj.unit}`;return baseQty(x)}
 function baseQty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
 const PIECE_WEIGHTS={
@@ -412,21 +426,22 @@ function compareShop(a,b,mode){
   if(mode==='tosano'){const aa=inferTosanoAisle(a),bb=inferTosanoAisle(b),ra=aa==null?999:(TOSANO_RANK[aa]??998),rb=bb==null?999:(TOSANO_RANK[bb]??998);return ra-rb||a.name.localeCompare(b.name,'it')}
   return generalRank(a.department)-generalRank(b.department)||(a.department||'').localeCompare(b.department||'','it')||a.name.localeCompare(b.name,'it')
 }
-function rangeCheckId(x,r=shopRange()){return idSafe(`v9|${r.from}|${r.to}|${x.key}`)}
+function rangeCheckId(x,r=shopRange()){return idSafe(`v18|${r.periodId||activePlanningPeriod().id}|${r.from}|${r.to}|${x.key}`)}
+function oldRangeCheckId(x,r=shopRange()){return idSafe(`v9|${r.from}|${r.to}|${x.key}`)}
 function itemChecked(x,r=shopRange()){
-  const specific=checks[rangeCheckId(x,r)];if(specific)return!!specific.checked;
-  const b=planBounds();if(r.from===b.from&&r.to===b.to)return!!(checks[idSafe(x.legacyKey||x.key)]?.checked||checks[idSafe(x.key)]?.checked);
-  return false
+  const specific=checks[rangeCheckId(x,r)];if(specific)return !!specific.checked&&(!specific.basis||specific.basis===shoppingBasis(x));
+  // Only dated v9 checks may be read in the legacy period. Never reuse undated checks.
+  if(isLegacyPeriod(r.periodId)){const old=checks[oldRangeCheckId(x,r)];return !!old?.checked&&old.rangeFrom===r.from&&old.rangeTo===r.to}
+  return false;
 }
 function shopContainer(){return shoppingModeOpen?$('shopModeOverlay'):$('shoppingList')}
 function currentShopScroll(){return shoppingModeOpen?$('shopModeOverlay').scrollTop:window.scrollY}
 function restoreShopScroll(v){requestAnimationFrame(()=>setTimeout(()=>{if(shoppingModeOpen)$('shopModeOverlay').scrollTop=v;else window.scrollTo({top:v,behavior:'auto'})},30))}
-function checkShopItem(x,checked){
-  const r=shopRange(),cid=rangeCheckId(x,r),peek=alphaPeek;
-  checks[cid]={checked,key:x.key,updatedAt:Date.now()};
-  if(peek)alphaPeek=null;
-  renderShopping();if(peek)restoreShopScroll(peek.scrollPos);
-  setDoc(doc(db,'households',householdId,'checks',cid),{checked,key:x.key,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()});
+async function checkShopItem(x,checked){
+  const r=shopRange(),cid=rangeCheckId(x,r),peek=alphaPeek,previous=checks[cid];
+  const data={checked,key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,basis:shoppingBasis(x),updatedAt:Date.now()};
+  checks[cid]=data;if(peek)alphaPeek=null;renderShopping();renderPortions();if(peek)restoreShopScroll(peek.scrollPos);
+  try{await setDoc(doc(db,'households',householdId,'checks',cid),data)}catch(e){if(previous)checks[cid]=previous;else delete checks[cid];renderShopping();renderPortions();alert('Spunta non salvata: '+e.message)}
 }
 function shopMeta(x,mode){
   if(mode==='tosano'){
@@ -512,7 +527,7 @@ $('saveAisle')?.addEventListener('click',async()=>{const name=$('aisleModal').da
 $('shopSort').onchange=()=>{alphaPeek=null;renderShopping()};
 $('hideChecked').onclick=()=>{hideDone=!hideDone;$('hideChecked').textContent='Nascondi presi: '+(hideDone?'SÌ':'NO');renderShopping()};
 $('addExtra').onclick=()=>$('modal').classList.remove('hidden');$('cancelExtra').onclick=()=>$('modal').classList.add('hidden');
-$('saveExtra').onclick=async()=>{const name=$('extraName').value.trim();if(!name)return;const ref=doc(collection(db,'households',householdId,'extras'));await setDoc(ref,{name,qty:Number($('extraQty').value||1),unit:$('extraUnit').value.trim()||'pz',department:$('extraDept').value,createdAt:Date.now()});$('modal').classList.add('hidden');$('extraName').value=''};
+$('saveExtra').onclick=async()=>{const name=$('extraName').value.trim();if(!name)return;const ref=doc(collection(db,'households',householdId,'extras'));await setDoc(ref,{name,qty:Number($('extraQty').value||1),unit:$('extraUnit').value.trim()||'pz',department:$('extraDept').value,createdAt:Date.now(),periodId:activePlanningPeriod().id});$('modal').classList.add('hidden');$('extraName').value=''};
 $('shareShop').onclick=async()=>{const r=shopRange(),arr=allShopItems(r);const text=['LISTA DELLA SPESA',shopRangeLabel(r),'',...arr.map(x=>`• ${x.name}: ${qty(x)}${approxPieces(x)?' · '+approxPieces(x):''}${x.extra?' [EXTRA]':''}`)].join('\n');if(navigator.share)try{await navigator.share({title:'Spesa PianoCasa',text})}catch{}else{await navigator.clipboard.writeText(text);alert('Lista copiata')}};
 for(const id of ['shopPeriod','portionPeriod'])$(id)?.addEventListener('change',e=>setShopPeriod(e.target.value));
 for(const prefix of ['shop','portion']){
@@ -678,20 +693,20 @@ function collectPortions(range=shopRange()){
   }
   return [...map.values()].sort((a,b)=>a.name.localeCompare(b.name,'it'))
 }
-function portionCheckId(range,itemKey,pid,grams){return idSafe(`portion|${range.from}|${range.to}|${itemKey}|${pid}|${grams}`)}
+function portionCheckId(range,itemKey,pid,grams){return idSafe(`portion18|${range.periodId||activePlanningPeriod().id}|${range.from}|${range.to}|${itemKey}|${pid}|${grams}`)}
 function renderPortions(){
   const box=$('portionList');if(!box||!householdId)return;syncShopPeriodControls();const r=shopRange(),arr=collectPortions(r),shopMap=Object.fromEntries(allShopItems(r).map(x=>[x.key,x]));
   $('portionInfo').textContent=`${arr.length} alimenti · ${shopRangeLabel(r)}`;box.innerHTML='';
   if(!arr.length){box.innerHTML='<div class="emptyHistory">Completa i menu del periodo per vedere le porzioni da preparare.</div>';return}
   for(const x of arr){const bought=shopMap[x.key]?itemChecked(shopMap[x.key],r):false,card=document.createElement('section');card.className='portionCard';
     const groups=[];let totalGroups=0,doneGroups=0;
-    for(const [pid,pp] of Object.entries(x.profiles))for(const [g,count] of Object.entries(pp.sizes)){const cid=portionCheckId(r,x.key,pid,g),done=!!portionChecks[cid]?.checked;totalGroups++;if(done)doneGroups++;groups.push({pid,pp,g:Number(g),count,cid,done})}
+    for(const [pid,pp] of Object.entries(x.profiles))for(const [g,count] of Object.entries(pp.sizes)){const cid=portionCheckId(r,x.key,pid,g),done=!!portionChecks[cid]?.checked&&portionChecks[cid]?.count===count;totalGroups++;if(done)doneGroups++;groups.push({pid,pp,g:Number(g),count,cid,done})}
     card.innerHTML=`<div class="portionHead"><div><h3>${x.name}</h3><div class="muted">Totale ${x.total>=1000?(x.total/1000).toLocaleString('it-IT',{maximumFractionDigits:2})+' kg':Math.round(x.total)+' g'}</div></div><div class="portionStatus ${bought?'bought':'waiting'}">${bought?'✓ Acquistato':'Da acquistare'}</div></div><div class="portionProgress"><div style="width:${totalGroups?doneGroups/totalGroups*100:0}%"></div></div>`;
     for(const [pid,pp] of Object.entries(x.profiles)){
       const sec=document.createElement('div');sec.className='portionPerson';sec.innerHTML=`<div class="portionPersonHead"><b>${pp.name}</b><span>${Math.round(pp.total)} g</span></div>`;
       for(const g of groups.filter(z=>z.pid===pid).sort((a,b)=>a.g-b.g)){
         const row=document.createElement('label');row.className='portionRow'+(g.done?' done':'');row.innerHTML=`<input type="checkbox" ${g.done?'checked':''}><span><b>${g.g} g</b> × ${g.count} ${g.count===1?'porzione':'porzioni'}</span>`;
-        row.querySelector('input').onchange=e=>{portionChecks[g.cid]={checked:e.target.checked,updatedAt:Date.now()};renderPortions();setDoc(doc(db,'households',householdId,'portionChecks',g.cid),{checked:e.target.checked,itemKey:x.key,profileId:pid,grams:g.g,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()})};sec.appendChild(row)
+        row.querySelector('input').onchange=e=>{portionChecks[g.cid]={checked:e.target.checked,count:g.count,updatedAt:Date.now()};renderPortions();setDoc(doc(db,'households',householdId,'portionChecks',g.cid),{checked:e.target.checked,count:g.count,periodId:r.periodId,itemKey:x.key,profileId:pid,grams:g.g,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()})};sec.appendChild(row)
       }
       card.appendChild(sec)
     }
@@ -703,19 +718,19 @@ function renderPortions(){
 function sanitizeSelectionsForDate(p,date,selections={}){
   const allowed=new Set(activeCats(p,date).map(c=>c.id));
   const out={};
-  for(const [cat,id] of Object.entries(selections||{}))if(allowed.has(cat))out[cat]=id;
+  for(const [cat,id] of Object.entries(selections||{}))if(allowed.has(cat)&&allCats(p).find(c=>c.id===cat)?.items.some(it=>it.id===id))out[cat]=id;
   return out;
 }
 async function copyDayTo(pid,srcDate,dstDate){
   const p=profiles[pid],src=days.find(x=>x.profileId===pid&&x.date===srcDate);
   if(!p||!src)return false;
-  const nd={profileId:pid,date:dstDate,selections:sanitizeSelectionsForDate(p,dstDate,structuredClone(src.selections||{})),consumed:{}};
+  const nd={profileId:pid,date:dstDate,selections:sanitizeSelectionsForDate(p,dstDate,structuredClone(src.selections||{})),oneOffs:{},consumed:{}};
   await saveDay(pid,dstDate,nd);return true;
 }
-async function copyWeekForProfiles(profileIds,srcStart,dstStart){
+async function copyWeekForProfiles(profileIds,srcStart,dstStart,lastDate=null){
   let copied=0;
   for(const pid of profileIds){
-    for(let i=0;i<7;i++)if(await copyDayTo(pid,addDays(srcStart,i),addDays(dstStart,i)))copied++;
+    for(let i=0;i<7;i++)if((!lastDate||addDays(dstStart,i)<=lastDate)&&await copyDayTo(pid,addDays(srcStart,i),addDays(dstStart,i)))copied++;
   }
   return copied;
 }
@@ -967,7 +982,7 @@ function renderDietEditor(){
     sec.querySelector('.renameMeal').onclick=()=>{const v=prompt('Nome del pasto:',m.label);if(v?.trim()){m.label=cleanDietName(v);dietDirty=true;renderDietEditor()}};
     for(const [cls,delta] of [['moveUp',-1],['moveDown',1]])sec.querySelector('.'+cls).onclick=()=>{[dietDraft.meals[mi],dietDraft.meals[mi+delta]]=[dietDraft.meals[mi+delta],dietDraft.meals[mi]];dietDirty=true;renderDietEditor()};
     sec.querySelector('.freeWeekend')?.addEventListener('change',e=>{m.freeWeekend=e.target.checked;markDietDirty()});
-    sec.querySelector('.addCat').onclick=()=>{const label=prompt('Nome della sezione (es. Frutta, Proteine):');if(label?.trim()){m.categories.push({id:newDietId(),label:cleanDietName(label),items:[]});dietDirty=true;renderDietEditor()}};
+    sec.querySelector('.addCat').onclick=()=>addDietCategory(m);
     for(const [ci,c] of m.categories.entries()){
       const cat=document.createElement('details');cat.className='dietCategory';cat.innerHTML=`<summary>${safeText(c.label)} <small>· ${c.items.length} alternative</small></summary><div class="actions"><button class="renameCat">Rinomina sezione</button><button class="danger removeCat">Elimina sezione</button></div><div class="dietItems"></div><button class="addItem">+ Aggiungi alimento</button>`;
       cat.querySelector('.renameCat').onclick=()=>{const v=prompt('Nome della sezione:',c.label);if(v?.trim()){c.label=cleanDietName(v);dietDirty=true;renderDietEditor()}};
@@ -1004,12 +1019,12 @@ async function saveDietEditor(){
 }
 window.addEventListener('beforeunload',e=>{if(dietDirty){e.preventDefault();e.returnValue=''}});
 function shoppingBasis(x){return JSON.stringify([x.grams??null,x.count??null,x.qty??null,x.unit??null])}
-function shoppingAdjustment(x){const a=shopAdjustments[rangeCheckId(x)];return a&&a.basis===shoppingBasis(x)?a:null}
+function shoppingAdjustment(x){const r=shopRange(),a=shopAdjustments[rangeCheckId(x,r)]||(isLegacyPeriod(r.periodId)?shopAdjustments[oldRangeCheckId(x,r)]:null);return a&&a.basis===shoppingBasis(x)?a:null}
 function editShoppingQuantity(x){
   const r=shopRange(),cid=rangeCheckId(x,r),a=shoppingAdjustment(x),amount=a?.amount??(x.extra?x.qty:x.grams>0?x.grams:x.count),unit=a?.unit??(x.extra?x.unit:x.grams>0?'g':x.unit||'pz');
   const dialog=editorDialog('Quantità da acquistare',`<p><b>${safeText(x.name)}</b></p><p>Previsti: ${safeText(baseQty(x))}</p><div class="grid2"><label>Da comprare<input name="amount" required type="number" min="0" step="any" value="${Number(amount)||0}"></label><label>Unità<select name="unit">${[...new Set([unit,'g','kg','pz','confezioni','ml','L'])].filter(Boolean).map(u=>`<option value="${safeText(u)}" ${u===unit?'selected':''}>${safeText(u)}</option>`).join('')}</select></label></div><p class="small">Vale per ${safeText(shopRangeLabel(r))}. Non cambia la dieta o le porzioni. Se cambia il totale previsto, si torna automaticamente al calcolo della dieta.</p><button class="resetQuantity" type="button">Ripristina quantità prevista</button>`);
   const ref=doc(db,'households',householdId,'shopAdjustments',cid),f=dialog.querySelector('form');
-  async function persist(reset){const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{if(reset){await deleteDoc(ref);delete shopAdjustments[cid]}else{const data={amount:dietNumber(f.elements.amount.value),unit:f.elements.unit.value,basis:shoppingBasis(x),key:x.key,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()};await setDoc(ref,data);shopAdjustments[cid]=data}renderShopping();dialog.close()}catch(e){dialog.querySelector('.dialogError').textContent='Salvataggio non riuscito: '+e.message;buttons.forEach(b=>b.disabled=false)}}
+  async function persist(reset){const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{if(reset){await setDoc(ref,{basis:'reset',periodId:r.periodId});shopAdjustments[cid]={basis:'reset',periodId:r.periodId}}else{const data={amount:dietNumber(f.elements.amount.value),unit:f.elements.unit.value,basis:shoppingBasis(x),key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()};await setDoc(ref,data);shopAdjustments[cid]=data}renderShopping();dialog.close()}catch(e){dialog.querySelector('.dialogError').textContent='Salvataggio non riuscito: '+e.message;buttons.forEach(b=>b.disabled=false)}}
   f.onsubmit=e=>{e.preventDefault();persist(false)};dialog.querySelector('.resetQuantity').onclick=()=>persist(true);
 }
 function foodAmount(it){return it.grams!=null?`${it.grams} g`:it.quantity!=null?`${it.quantity} ${it.unit||'pz'}`:''}
@@ -1019,4 +1034,121 @@ function dietFingerprint(value){
   if(Array.isArray(value))return '['+value.map(dietFingerprint).join(',')+']';
   if(value!==null&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+dietFingerprint(value[key])).join(',')+'}';
   return JSON.stringify(value);
+}
+
+// v18 — shared planning periods. A date belongs to at most one saved period.
+function legacyPlanningPeriod(){const b=legacyPlanBounds();return{id:'legacy_'+b.from+'_'+b.to,from:b.from,to:b.to,legacy:true}}
+function planningPeriods(){return householdDoc.planningPeriods?.length?householdDoc.planningPeriods:[legacyPlanningPeriod()]}
+function activePlanningPeriod(){const periods=planningPeriods();return periods.find(p=>p.id===householdDoc.activePlanningPeriodId)||periods.at(-1)}
+function isLegacyPeriod(id=activePlanningPeriod().id){return planningPeriods().some(p=>p.id===id&&p.legacy)}
+function applyPlanningPeriod(){
+  if(!Object.keys(profiles).length)return;
+  const period=activePlanningPeriod();if(lastPlanningPeriodId===period.id)return;
+  lastPlanningPeriodId=period.id;shopRangeMode='all';shopCustomStart='';shopCustomEnd='';alphaPeek=null;hideDone=false;
+  $('hideChecked').textContent='Nascondi presi: NO';expandedCats.clear();scrollAfterRender=null;
+  const today=isoToday();currentDate=today>=period.from&&today<=period.to?today:period.from;
+  if(!periodFormDirty){$('startDate').value=addDays(period.to,1);$('endDate').value=addDays(period.to,14)}
+}
+function renderPlanningPeriod(){
+  if(!Object.keys(profiles).length)return;
+  const active=activePlanningPeriod();$('planningPeriodSelect').innerHTML=[...planningPeriods()].sort((a,b)=>a.from.localeCompare(b.from)).map(p=>`<option value="${safeText(p.id)}" ${p.id===active.id?'selected':''}>${safeText(shopRangeLabel(p))}${p.legacy?' · precedente':''}</option>`).join('');
+  $('planningPeriodSelect').disabled=periodWritePending;
+  $('planningPeriodNote').textContent=active.legacy?'Crea il prossimo periodo per una nuova spesa separata.':'Periodo condiviso tra Anna e Vincenzo';
+}
+function validPeriodDates(from,to){
+  const valid=s=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(parseISO(s).getTime())&&addDays(s,0)===s;
+  if(!valid(from)||!valid(to)||from>to)throw new Error('Controlla le date: la fine deve essere uguale o successiva all’inizio.');
+  if(to>addDays(from,365))throw new Error('Il periodo può durare al massimo un anno.');
+}
+function appendPlanningPeriod(house,legacy,period){
+  validPeriodDates(period.from,period.to);
+  let list=house.planningPeriods?.length?structuredClone(house.planningPeriods):[];
+  if(list.some(p=>period.from<=p.to&&period.to>=p.from))throw new Error('Le date si sovrappongono a un periodo salvato. Sceglilo dall’elenco oppure usa date successive.');
+  // A legacy date filter was not a true period. Keep it only if disjoint;
+  // existing date-keyed menus remain untouched, including outside these dates.
+  if(!list.length&&(legacy.to<period.from||legacy.from>period.to))list.push(legacy);
+  list.push(period);return list;
+}
+async function createPlanningPeriod(){
+  if(periodWritePending)return;
+  const from=$('startDate').value,to=$('endDate').value,button=$('savePeriod');
+  try{
+    validPeriodDates(from,to);const legacy=legacyPlanningPeriod(),period={id:'period_'+crypto.randomUUID(),from,to,createdAt:Date.now()};
+    appendPlanningPeriod(householdDoc,legacy,period);periodWritePending=true;button.disabled=true;renderPlanningPeriod();
+    let saved;
+    await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId),s=await tx.get(ref);if(!s.exists())throw new Error('Famiglia non trovata.');const house=s.data();const list=appendPlanningPeriod(house,legacy,period);saved={...house,planningPeriods:list,activePlanningPeriodId:period.id};tx.update(ref,{planningPeriods:list,activePlanningPeriodId:period.id})});
+    householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';tab('today');window.scrollTo({top:0,behavior:'smooth'});
+  }catch(e){$('periodMessage').textContent='Periodo non creato: '+e.message}finally{periodWritePending=false;button.disabled=false;renderPlanningPeriod()}
+}
+async function activatePlanningPeriod(id){
+  if(periodWritePending)return;
+  if(!planningPeriods().some(p=>p.id===id)){renderPlanningPeriod();return}
+  periodWritePending=true;renderPlanningPeriod();
+  try{await updateDoc(doc(db,'households',householdId),{activePlanningPeriodId:id});householdDoc.activePlanningPeriodId=id;periodFormDirty=false;renderAll()}
+  catch(e){alert('Cambio periodo non salvato: '+e.message)}finally{periodWritePending=false;renderPlanningPeriod()}
+}
+function extraInPeriod(extra,periodId){return extra.periodId?extra.periodId===periodId:isLegacyPeriod(periodId)}
+
+// Counts are planned selections, not inferred package sizes or household stock.
+function foodUsageUntil(date){
+  const range=planBounds(),end=date<range.to?date:range.to,result={};
+  if(end<range.from)return result;
+  for(const p of Object.values(profiles))for(const d of days.filter(x=>x.profileId===p.id&&x.date>=range.from&&x.date<=end))for(const c of activeCats(p,d.date)){
+    const it=selectedItem(p,d,c);if(!it)continue;const key=normalizeName(it.name);result[key]||={};result[key][p.id]=(result[key][p.id]||0)+1;
+  }return result;
+}
+function foodUsageMarkup(item,usage){
+  const counts=usage[normalizeName(item.name)]||{};
+  return `<span class="foodUsage" aria-label="Scelte nel periodo fino al giorno visualizzato">${Object.values(profiles).sort((a,b)=>a.displayName.localeCompare(b.displayName,'it')).map(p=>`<span><span>${safeText(p.id==='vincenzo'?'Vinc.':p.displayName)}</span><b>${counts[p.id]||0}×</b></span>`).join('')}</span>`;
+}
+function tagsForProfile(item,source,target){
+  const tags=new Set(item.tags||[]);
+  for(const rule of target.rules||[]){if((source.rules||[]).some(r=>normalizeName(r.label)===normalizeName(rule.label)&&item.tags?.includes(r.tag)))tags.add(rule.tag)}
+  return [...tags];
+}
+function oneOffChoice(source,sourceProfile,target,amount){
+  const it=structuredClone(source),old=Number(source.grams??source.quantity??1);
+  it.id='once_'+crypto.randomUUID();it.tags=tagsForProfile(source,sourceProfile,target);
+  if(source.grams!=null)it.grams=amount;else{it.grams=null;it.quantity=amount;it.unit=source.unit||'pz'}
+  if(source.grams!=null&&it.quantity!=null)it.quantity=amount;
+  it.kcal=old>0?Math.round((Number(source.kcal)||0)*amount/old):Number(source.kcal)||0;
+  it.oneOff=true;it.sourceProfileId=sourceProfile.id;return it;
+}
+function choosePartnerOnce(p,c,date,pick){
+  if(!pick?.item)return;
+  const source=structuredClone(pick.item),unit=source.grams!=null?'g':source.unit||'pz',amount=source.grams??source.quantity??1;
+  const dialog=editorDialog('Scelta solo per questo giorno',`<p><b>${safeText(source.name)}</b></p><p>${safeText(p.displayName)} · ${safeText(fmt(date,true))} · ${safeText(c.label)}</p><label>La tua quantità (${safeText(unit)})<input name="amount" type="number" required min="0.01" step="any" value="${amount}"></label><p class="small">Partiamo dalla quantità di ${safeText(pick.partner.displayName)}: puoi cambiarla. Non viene aggiunto alle alternative della dieta. La scelta entra nel menu e nella spesa di questo giorno e non viene ripetuta copiando il menu.</p><p class="oneOffLimit small"></p><label class="switch oneOffConsent hidden"><input name="acceptLimit" type="checkbox">Confermo l’eccezione al limite di frequenza per questa scelta.</label>`);
+  const form=dialog.querySelector('form'),warning=dialog.querySelector('.oneOffLimit'),consent=dialog.querySelector('.oneOffConsent');
+  const mapped=oneOffChoice(source,pick.partner,p,amount);
+  const hard=(p.rules||[]).find(r=>r.disabledWhen&&p.conditions?.[r.disabledWhen]&&mapped.tags?.includes(r.tag));
+  const reason=itemLimitReason(p,date,c.id,mapped);if(reason)warning.textContent=reason;
+  if(hard){dialog.querySelector('button[type=submit]').disabled=true;warning.textContent=hard.label+': alimento non disponibile per questo profilo.';return}
+  if(reason)consent.classList.remove('hidden');
+  form.onsubmit=async e=>{e.preventDefault();const button=dialog.querySelector('button[type=submit]');try{
+    const n=dietNumber(form.elements.amount.value);if(n<=0)throw new Error('La quantità deve essere maggiore di zero.');
+    const current=profiles[p.id],category=allCats(current).find(x=>x.id===c.id);if(!category)throw new Error('Questa sezione non è più presente nella dieta.');
+    const it=oneOffChoice(source,pick.partner,current,n),blocked=(current.rules||[]).find(r=>r.disabledWhen&&current.conditions?.[r.disabledWhen]&&it.tags?.includes(r.tag));
+    if(blocked)throw new Error(blocked.label+': alimento non disponibile per questo profilo.');
+    const limit=itemLimitReason(current,date,c.id,it);if(limit&&!form.elements.acceptLimit.checked){warning.textContent=limit;consent.classList.remove('hidden');throw new Error('Conferma l’eccezione al limite oppure annulla.');}
+    const next=structuredClone(dayDoc(current.id,date));next.selections||={};next.oneOffs||={};next.selections[c.id]=it.id;next.oneOffs[c.id]=it;
+    button.disabled=true;expandedCats.delete(c.id);await saveDay(current.id,date,next);dialog.close();
+  }catch(err){dialog.querySelector('.dialogError').textContent=err.message;button.disabled=false}};
+}
+
+function dietCategoryTemplates(){
+  const result=[],ordered=[dietDraft,...Object.values(profiles).filter(p=>p.id!==dietDraft.id)];
+  for(const p of ordered)for(const m of p.meals||[])for(const c of m.categories||[])if(c.items?.length)result.push({profile:p,meal:m,category:c});
+  return result;
+}
+function cloneDietCategory(template,target){
+  const copy=structuredClone(template.category);copy.id=newDietId();
+  copy.items=copy.items.map(item=>({...item,id:newDietId(),tags:tagsForProfile(item,template.profile,target)}));return copy;
+}
+function addDietCategory(meal){
+  const templates=dietCategoryTemplates();
+  const dialog=editorDialog('Aggiungi sezione',`<label>Copia una sezione esistente<select name="template">${templates.map((t,i)=>`<option value="${i}">${safeText(t.profile.displayName)} · ${safeText(t.meal.label)} · ${safeText(t.category.label)} (${t.category.items.length} alimenti)</option>`).join('')}</select></label><p class="small">Copiamo tutte le alternative con quantità, kcal e gruppi dei limiti. Se scegli una sezione dell’altro profilo, controlla le quantità prima di salvare la dieta.</p><div class="templatePreview"></div><button type="button" class="manualCategory">Crea una sezione vuota manualmente</button><label class="manualCategoryName hidden">Nome della nuova sezione<input name="categoryName" maxlength="160" placeholder="Es. Frutta"></label>`);
+  let manual=false;const form=dialog.querySelector('form'),preview=dialog.querySelector('.templatePreview'),select=form.elements.template;
+  const draw=()=>{const t=templates[Number(select.value)];preview.innerHTML=t?`<b>${safeText(t.category.label)}</b><ul>${t.category.items.map(it=>`<li>${safeText(it.name)} · ${safeText(foodAmount(it))}</li>`).join('')}</ul>`:'Nessuna sezione da copiare. Puoi crearne una vuota.'};draw();select.onchange=draw;
+  dialog.querySelector('.manualCategory').onclick=()=>{manual=!manual;select.disabled=manual;preview.classList.toggle('hidden',manual);dialog.querySelector('.manualCategoryName').classList.toggle('hidden',!manual);form.elements.categoryName.required=manual;dialog.querySelector('.manualCategory').textContent=manual?'Torna alle sezioni esistenti':'Crea una sezione vuota manualmente';if(manual)form.elements.categoryName.focus()};
+  form.onsubmit=e=>{e.preventDefault();try{let category;if(manual){const label=cleanDietName(form.elements.categoryName.value);if(!label)throw new Error('Inserisci un nome per la sezione.');category={id:newDietId(),label,items:[]}}else{const template=templates[Number(select.value)];if(!template)throw new Error('Scegli una sezione oppure creala manualmente.');category=cloneDietCategory(template,dietDraft)}meal.categories.push(category);dietDirty=true;renderDietEditor();dialog.close()}catch(err){dialog.querySelector('.dialogError').textContent=err.message}};
 }

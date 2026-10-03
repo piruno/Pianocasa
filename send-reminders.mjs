@@ -47,7 +47,7 @@ function currentSummary(p,d,date){
  const result={},dow=new Date(date+'T12:00:00Z').getUTCDay();
  for(const m of p?.meals||[]){
   if(m.freeWeekend!==false&&((dow===6&&m.id==='dinner')||(dow===0&&m.id==='lunch'))){result[m.id]='Pasto libero';continue}
-  result[m.id]=m.categories.map(c=>{const it=c.items.find(x=>x.id===d.selections?.[c.id]);return it?`${it.name}${it.grams!=null?' '+it.grams+' g':it.quantity!=null?' '+it.quantity+' '+(it.unit||'pz'):''}`:null}).filter(Boolean).join(' + ');
+  result[m.id]=m.categories.map(c=>{const id=d.selections?.[c.id],once=d.oneOffs?.[c.id],it=once?.id===id?once:c.items.find(x=>x.id===id);return it?`${it.name}${it.grams!=null?' '+it.grams+' g':it.quantity!=null?' '+it.quantity+' '+(it.unit||'pz'):''}`:null}).filter(Boolean).join(' + ');
  }return result;
 }
 function summaryText(s,all,p){return (p?.meals||[]).filter(m=>all||['lunch','dinner'].includes(m.id)).filter(m=>s[m.id]).map(m=>`${m.label}: ${s[m.id]}`).join(' · ').slice(0,900)}
