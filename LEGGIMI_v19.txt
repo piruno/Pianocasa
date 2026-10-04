@@ -1,0 +1,108 @@
+PIANOCASA v19 — aggiornamento sulla versione allegata v18.1
+
+INSTALLAZIONE
+1. Estrai lo ZIP. Su GitHub apri il repository Pianocasa e carica TUTTI
+   i file di questo aggiornamento nella cartella dove si trova index.html.
+   Sovrascrivi quelli esistenti; i nuovi file vanno aggiunti accanto ad app.js.
+2. Non cambiare config.js, le diete o le regole Firebase: non sono modificati.
+3. Conferma il caricamento e attendi la pubblicazione di GitHub Pages.
+4. Apri PianoCasa con internet, chiudi e riapri l'app se mostra ancora v18.1.
+   La nuova intestazione deve indicare v19. Non cancellare i dati del sito.
+
+PRIMA DI ANDARE AL SUPERMERCATO — IMPORTANTE
+Apri Spesa online, seleziona il periodo e attendi “Lista salvata sul telefono”.
+Il collegamento “Apri spesa offline” è sempre visibile, anche nella schermata
+Accesso: apre una pagina indipendente da Firebase e dal ripristino del login.
+Provala in modalità aereo sul telefono effettivamente usato per fare la spesa.
+Serve una prima apertura online della nuova versione; una prima visita assoluta
+senza rete non può recuperare dati che il dispositivo non ha mai scaricato.
+La copia offline contiene l'ULTIMO intervallo di spesa aperto su quel telefono.
+Spunte, reparti e quantità corrette restano locali fino alla riapertura dell'app
+con lo stesso account e internet. Le modifiche locali possono richiedere alcuni
+secondi per sincronizzarsi. Non cancellare i dati del browser e non uscire
+finché ci sono modifiche da sincronizzare. Se il sistema/browser elimina i dati
+locali, la copia deve essere preparata nuovamente. Non è un backup permanente.
+La copia è leggibile da chi usa quel telefono senza un nuovo login; Esci rimuove
+la copia della lista. La coda di modifiche rimane vincolata all'account originale.
+Le diete e la creazione dei periodi non sono funzioni della pagina offline.
+
+REPARTI E QUANTITÀ
+- Tonno conservato nel reparto 15 prima della regola generica dei sott'olio.
+- Nutella / creme alla nocciola nel reparto 8; latte normale nel fresco 27,
+  varianti speciali nel 25, secondo la mappa già presente nell'app.
+- Corretti pasta al pomodoro, farine e varie corrispondenze troppo generiche
+  (esempio: “gin” dentro “extravergine”). Nessuna verifica fisica dei corridoi.
+- “Cambia reparto Tosano” è disponibile nella lista, modalità spesa e A–Z.
+  La scelta manuale prevale sulle regole automatiche e vale nelle prossime spese.
+  È disponibile anche nella pagina offline. Non cancella le correzioni già fatte.
+- Sotto ogni prodotto della dieta: porzione individuale × numero di pasti per
+  persona nel periodo. Non sono confezioni commerciali né porzioni già preparate.
+  Se correggi il totale da comprare, le porzioni del menu restano quelle pianificate.
+- Pomodori e altri prodotti: stime in pezzi con intervallo di peso per pezzo.
+  Sono indicazioni di taglia, non sostituiscono la pesata. Seguono le correzioni
+  in g/kg; non stimano i pezzi quando l'unità non è una massa.
+
+RISPARMIO — FACOLTATIVO
+Spesa normale e Risparmio condividono le stesse spunte del medesimo intervallo.
+1. Risparmio > Confronto: zona, raggio, giorno > Prepara file per ChatGPT.
+2. Allega il TXT a ChatGPT e chiedi di eseguire le istruzioni con ricerca web.
+   Non è un collegamento diretto dell'abbonamento, non avvia chiamate API a pagamento.
+3. ChatGPT deve restituire un file JSON conforme allo schema incluso nel TXT.
+4. Importa il JSON, scegli il negozio. I prezzi senza conferma o fuori validità
+   non entrano nel totale verificato. La copertura mostra quante voci hanno prezzo.
+   Un subtotale incompleto non è una garanzia di supermercato più conveniente.
+5. Le offerte equivalenti meno care per unità sono selezionabili sotto la riga,
+   con costo oggi e confronto a quantità uguali. Non modificano la dieta.
+   Le offerte selezionate sono incluse nella copia offline preparata dopo la scelta.
+6. Modifiche alla lista invalidano il confronto: preparane uno nuovo. La ricerca
+   va aggiornata manualmente; nessuna scansione periodica automatica o notifica
+   promozionale viene attivata in questa versione.
+I suggerimenti per acquisti futuri arrivano dal confronto importato con relative
+fonti; puoi aggiungerli come extra del periodo. Il programma non inventa offerte.
+Distanze e prezzi sono quelli delle fonti ricercate: verificare il punto vendita.
+Gli sconti carrello non ripartibili con certezza sono descritti nelle condizioni,
+non sottratti arbitrariamente. Le schede mostrano prezzi storici separatamente.
+
+SCONTRINI SENZA ARCHIVIO FOTOGRAFICO
+Le foto sono elaborate dal lettore OCR nel browser e non caricate su Firebase.
+Servono componenti OCR scaricabili da CDN e lingua italiana: può servire internet.
+Usa foto ritagliate sullo scontrino, dritte, con descrizioni e prezzi ben leggibili.
+In alternativa puoi incollare il testo. Non viene salvata alcuna immagine.
+Il lettore propone righe da controllare: inserisci negozio/indirizzo e data, verifica
+il totale, correggi o aggiungi righe. Puoi confermare tutte le righe insieme.
+La somma corrispondente non garantisce descrizioni, quantità e formati corretti.
+Conferma e archivia usa solo righe confermate e totale coerente.
+“Archivia comunque, da verificare” conserva testo e righe, ma esclude lo scontrino
+ dai prezzi affidabili. Puoi riaprirlo e correggerlo. La foto non sarà recuperabile.
+Ticket, contanti e carta sono mezzi di pagamento: non sono sconti.
+Uno sconto riga va inserito negativo. Lo storico non attribuisce automaticamente
+un buono sul totale al prezzo di un singolo prodotto.
+Marca/formato non leggibili richiedono conferma: non sono ricostruiti per intuito.
+Il parser è generale e conservativo: non si promette lettura perfetta di ogni cassa.
+L'importazione scontrino NON spunta automaticamente la lista né aumenta da sola
+la dispensa: evita doppi conteggi con gli acquisti già segnati durante la spesa.
+
+DISPENSA, CARTE E COUPON
+La dispensa è condivisa e modificabile: aggiungi, correggi o segna Finito.
+Nel confronto puoi aggiungere un prodotto in dispensa inserendo il totale reale.
+Il consumo dei menu non è detratto automaticamente; correggi quando consumi.
+La quantità da acquistare rimane correggibile nella Spesa dopo aver verificato
+le scorte. Nessuna sottrazione automatica o doppia sottrazione.
+Carte: numero testuale/intestatario; usa l'app ufficiale per QR e codici alla cassa.
+Coupon: OCR degli screenshot per ricavarne il testo, poi scheda con condizioni,
+scadenza, stato attivato/usato. L'attivazione si fa nell'app del supermercato.
+Non c'è accesso automatico agli account privati dei supermercati.
+Il TXT per ChatGPT include negozi/intestatari delle carte, non il loro numero.
+Le immagini non entrano nel backup: restano solo dati e testo.
+Esporta regolarmente il backup da Risparmio; il ripristino sostituisce le schede
+con lo stesso ID, senza toccare diete o menu.
+
+VERIFICHE E LIMITI DELLA CONSEGNA
+Test automatici di logica e DOM simulato: reparti, porzioni, pezzi, sconti/ticket,
+confronti/offerte, validazione import, schermate, spunte condivise, pagina offline,
+coda persistente, account separati, replay e protezione da aggiornamenti più recenti,
+precache e mancata archiviazione delle risposte private Firebase.
+Prova OCR locale sullo scontrino allegato: errori di riga rilevati dalla quadratura.
+Non eseguiti test reali iPhone/Safari, rete Firebase utente o scontrini di altri negozi.
+Download del browser di test non disponibile nell'ambiente di lavoro.
+Nessun dato reale, foto, scontrino di esempio o prezzo inventato incluso nello ZIP.

@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { initializeAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, indexedDBLocalPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, runTransaction, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, runTransaction, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
 let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
@@ -17,7 +17,7 @@ if(badConfig){
 }else{
   app=initializeApp(C.firebase);
   auth=initializeAuth(app,{persistence:[indexedDBLocalPersistence,browserLocalPersistence]});
-  db=getFirestore(app);
+  db=initializeFirestore(app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});
   initPersistentAuth();
 }
 
@@ -67,8 +67,8 @@ function complete(p,d){return activeCats(p,d.date).every(c=>selectedItem(p,d,c))
 function show(id){['authLoadingView','authView','onboardView','appView'].forEach(x=>$(x)?.classList.toggle('hidden',x!==id));$('signoutBtn').classList.toggle('hidden',id!=='appView')}
 $('loginBtn')?.addEventListener('click',async()=>{try{const email=$('email').value.trim();await signInWithEmailAndPassword(auth,email,$('password').value);localStorage.setItem('pianocasa_last_email',email);$('authMsg').textContent=''}catch(e){$('authMsg').textContent=e.message}})
 $('registerBtn')?.addEventListener('click',async()=>{try{await createUserWithEmailAndPassword(auth,$('email').value.trim(),$('password').value);$('authMsg').textContent=''}catch(e){$('authMsg').textContent=e.message}})
-$('signoutBtn').onclick=()=>signOut(auth);
-async function handleAuth(u){clearListeners();user=u;if(!u){show('authView');return}const snap=await getDoc(doc(db,'users',u.uid));if(!snap.exists()){show('onboardView');renderOnboard()}else{userDoc=snap.data();householdId=userDoc.householdId;currentProfileId=userDoc.profileId;await startApp()}}
+$('signoutBtn').onclick=()=>{if(PCOffline.pending().length&&!confirm('Ci sono modifiche locali da sincronizzare. Uscire senza cancellarle?'))return;localStorage.removeItem('pc19_snapshot');signOut(auth).then(()=>location.reload())};
+async function handleAuth(u){clearListeners();user=u;if(!u){show('authView');return}try{const snap=await getDoc(doc(db,'users',u.uid));if(!snap.exists()){show('onboardView');renderOnboard()}else{userDoc=snap.data();householdId=userDoc.householdId;currentProfileId=userDoc.profileId;await startApp()}}catch(e){show('authView');$('authMsg').textContent='Accesso cloud non disponibile. Usa Apri spesa offline se hai già preparato la lista. '+e.message}}
 function clearListeners(){listeners.forEach(f=>f());listeners=[]}
 function renderOnboard(){show('onboardView');$('onboardBody').innerHTML=`<p>Scegli solo la prima volta.</p><div class="actions"><button id="createHome" class="primary">Sono Vincenzo · crea famiglia</button></div><hr><label>Codice invito<input id="inviteCode" maxlength="14" placeholder="codice da Vincenzo"></label><button id="joinHome" class="primary" style="margin-top:8px">Sono Anna · entra</button><div id="onMsg" class="msg"></div>`;$('createHome').onclick=createHousehold;$('joinHome').onclick=joinHousehold}
 async function createHousehold(){try{const hid=crypto.randomUUID();const b=writeBatch(db);b.set(doc(db,'households',hid),{createdAt:Date.now(),label:'Casa'});b.set(doc(db,'households',hid,'members',user.uid),{uid:user.uid,email:user.email,profileId:'vincenzo',displayName:'Vincenzo',notifyAt:'07:30',includePartnerMenu:false,owner:true});b.set(doc(db,'users',user.uid),{householdId:hid,profileId:'vincenzo',email:user.email});await b.commit();location.reload()}catch(e){$('onMsg').textContent=e.message}}
@@ -77,15 +77,15 @@ async function startApp(){
   show('appView');
   const ms=await getDoc(doc(db,'households',householdId,'members',user.uid));
   member=ms.data();currentProfileId=currentProfileId||member.profileId;
-  listeners.push(onSnapshot(doc(db,'households',householdId),s=>{householdDoc=s.data()||{};applyPlanningPeriod();renderAll();renderSiriSettings();scheduleSiriSync()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll();scheduleSiriSync()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll();scheduleSiriSync()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping();renderPortions()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{checks={};s.forEach(x=>checks[x.id]=x.data());renderShopping();renderPortions()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'storeMappings'),s=>{storeMappings={};s.forEach(x=>storeMappings[x.id]=x.data());renderShopping()}));
+  listeners.push(onSnapshot(doc(db,'households',householdId),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('household');householdDoc=s.data()||{};applyPlanningPeriod();renderAll();renderSiriSettings();scheduleSiriSync()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'profiles'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('profiles');profiles={};s.forEach(x=>profiles[x.id]=normalizeProfile(x.data()));renderAll();scheduleSiriSync()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'days'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('days');days=s.docs.map(x=>({id:x.id,...x.data()}));renderAll();scheduleSiriSync()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'extras'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('extras');extras=s.docs.map(x=>({id:x.id,...x.data()}));renderShopping();renderPortions()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'checks'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('checks');checks={};s.forEach(x=>checks[x.id]=x.data());for(const q of PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='checks'))checks[q.id]=q.data;renderShopping();renderPortions()}));
+  listeners.push(onSnapshot(collection(db,'households',householdId,'storeMappings'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('storeMappings');storeMappings={};s.forEach(x=>storeMappings[x.id]=x.data());for(const q of PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='storeMappings'))storeMappings[q.id]=q.data;renderShopping()}));
   listeners.push(onSnapshot(collection(db,'households',householdId,'portionChecks'),s=>{portionChecks={};s.forEach(x=>portionChecks[x.id]=x.data());renderPortions()}));
-  listeners.push(onSnapshot(collection(db,'households',householdId,'shopAdjustments'),s=>{shopAdjustments={};s.forEach(x=>shopAdjustments[x.id]=x.data());renderShopping()}));
-  renderMember();setupAlphaIndex();syncShopPeriodControls();
+  listeners.push(onSnapshot(collection(db,'households',householdId,'shopAdjustments'),s=>{if(!s.metadata?.fromCache)snapshotLoaded.add('shopAdjustments');shopAdjustments={};s.forEach(x=>shopAdjustments[x.id]=x.data());for(const q of PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='shopAdjustments'))shopAdjustments[q.id]=q.data;renderShopping()}));
+  renderMember().catch(()=>{});setupAlphaIndex();syncShopPeriodControls();startSavings();flushOffline();
 }
 function renderAll(){applyPlanningPeriod();renderPlanningPeriod();if(!profiles[currentProfileId]&&profiles[member?.profileId])currentProfileId=member.profileId;renderProfileSelect();renderToday();renderShopping();renderPortions();renderHistory();renderRules();if(!dietDirty&&!document.querySelector('dialog.editorDialog[open]')){dietDraft=null;renderDietEditor();}if(menuOverlayDate)renderMenuOverlay(menuOverlayDate)}
 function tab(id){
@@ -93,6 +93,7 @@ function tab(id){
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
   if(id==='diet'){if(!dietDirty)dietDraft=null;renderDietEditor();}
   if(id==='shopping')renderShopping();
+  if(id==='savings')window.PCSavings?.render();
   if(id==='portions')renderPortions();
   if(id==='history')renderHistory();
   renderAlphaIndex();
@@ -317,8 +318,8 @@ function collectShop(range=shopRange()){
         const it=selectedItem(p,d,c);if(!it)continue;
         const unit=it.grams!=null?'g':it.unit||'porzioni';
         const key=normalizeName(it.name)+(unit==='g'?'':'|'+unit);
-        if(!map.has(key))map.set(key,{key,legacyKey:it.name.toLowerCase(),name:it.name,grams:it.grams!=null?0:null,count:0,unit,department:it.department||'Altro',extra:false,categoryLabels:[],sourceDepartments:[]});
-        const x=map.get(key);x.count+=it.grams!=null?1:Number(it.quantity??1);if(it.grams!=null)x.grams+=Number(it.grams);
+        if(!map.has(key))map.set(key,{key,legacyKey:it.name.toLowerCase(),name:it.name,grams:it.grams!=null?0:null,count:0,unit,department:it.department||'Altro',extra:false,categoryLabels:[],sourceDepartments:[],servings:[]});
+        const x=map.get(key);x.servings.push({person:p.displayName,amount:Number(it.grams??it.quantity??1),unit,date:d.date});x.count+=it.grams!=null?1:Number(it.quantity??1);if(it.grams!=null)x.grams+=Number(it.grams);
         if(c.label&&!x.categoryLabels.includes(c.label))x.categoryLabels.push(c.label);
         if(it.department&&!x.sourceDepartments.includes(it.department))x.sourceDepartments.push(it.department)
       }
@@ -330,26 +331,27 @@ function collectShop(range=shopRange()){
       map.get(key).count+=(sp.qtyPerDay||0)*nd
     }
   }
-  return [...map.values()]
+  return [...map.values()].map(x=>({...x,department:correctGeneralDepartment(x)}))
 }
+function correctGeneralDepartment(x){const n=normalizeName(x.name);if(/^pasta\b|^riso\b|farina|^pane\b/.test(n))return'Cereali e pane';if(/^latte\b|ricotta|yogurt|mozzarella|parmigiano|^grana\b/.test(n))return'Latticini e uova';if(/^pomodor[io]\b|^(pesca|pesche|banana|banane|mela|mele|pera|pere)$/.test(n))return'Frutta e verdura';if(/borlotti|cannellini|ceci|lenticchie/.test(n))return'Legumi';return x.department||'Altro'}
 function allShopItems(range=shopRange()){return collectShop(range).concat(extras.filter(e=>extraInPeriod(e,range)).map(e=>({...e,key:'extra:'+e.id,extra:true,categoryLabels:[],sourceDepartments:[e.department||'Altro']})))}
 function qty(x){const adj=shoppingAdjustment(x);if(adj)return `${Number(adj.amount).toLocaleString('it-IT')} ${adj.unit}`;return baseQty(x)}
 function baseQty(x){if(x.extra)return `${x.qty||''} ${x.unit||''}`.trim();if(x.grams!=null&&x.grams>0)return x.grams>=1000?`${(x.grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})} kg`:`${Math.round(x.grams)} g`;return `${x.count} ${x.unit||'porzioni'}`}
 const PIECE_WEIGHTS={
-  'albicocche':[35,50],'arance':[160,220],'banana':[100,140],'carciofi':[180,250],'carote':[80,120],'cavolfiore':[700,1200],'cetrioli':[200,300],
+  'lattuga':[200,400],'lattuga iceberg':[300,600],'pomodori per insalata':[120,200],'pomodoro da insalata':[120,200],'patate':[120,220],'albicocche':[35,50],'arance':[160,220],'banana':[100,140],'carciofi':[180,250],'carote':[80,120],'cavolfiore':[700,1200],'cetrioli':[200,300],
   'cipolle':[120,180],'clementine':[70,100],'fichi':[40,60],"fichi d india":[90,130],'finocchi':[250,350],'mandaranci':[100,150],'mandarini':[80,110],
   'mela':[130,180],'melagrana':[250,400],'melanzane':[250,400],'melone':[900,1500],'nespole':[30,50],'peperoni':[180,280],'pera':[150,220],
   'pesca':[160,220],'pomodori da insalata':[120,200],'pompelmo':[250,400],'pompelmo rosa':[250,400],'porri':[200,350],'prugne':[50,80],
   'broccolo a testa':[400,700],'cavolo broccolo verde':[400,700],'zucchine':[150,250],'uova intere':[55,65],"albume d uovo":null
 };
 function approxPieces(x){
-  if(shoppingAdjustment(x))return '';
-  if(!x||x.extra||!x.grams||x.grams<=0)return'';const n=normalizeName(x.name);
-  if(/cilieg|datter|mirtill|lamp|more|ribes|uva|amarene|asparag|insalata|lattuga|spinaci|rucola|bieta|fagiolini|funghi|cicoria|valeriana|crescione/.test(n))return'';
-  let w=null;for(const [k,v] of Object.entries(PIECE_WEIGHTS))if(v&&n===k){w=v;break}if(!w)return'';
-  let lo=Math.max(1,Math.round(x.grams/w[1])),hi=Math.max(lo,Math.round(x.grams/w[0]));
-  return lo===hi?`≈ ${lo} pz`:`≈ ${lo}–${hi} pz`
+  if(!x)return '';const a=shoppingAdjustment(x);let grams=a?(a.unit==='kg'?Number(a.amount)*1000:a.unit==='g'?Number(a.amount):0):Number(x.grams||0);
+  if(!grams)return '';const n=normalizeName(x.name);let w=PIECE_WEIGHTS[n];
+  if(!w&&/^pomodor[io] (da|per) insalata$/.test(n))w=[120,200];
+  if(!w)return '';const lo=Math.max(1,Math.ceil(grams/w[1])),hi=Math.max(lo,Math.ceil(grams/w[0]));
+  return `≈ ${lo===hi?lo:lo+'–'+hi} pz · stima ${w[0]}–${w[1]} g/pz, verifica il peso`;
 }
+function servingsText(x){const groups=new Map();for(const v of x.servings||[]){const k=JSON.stringify([v.person,v.amount,v.unit]);groups.set(k,(groups.get(k)||0)+1)}return [...groups].map(([k,n])=>{const [p,a,u]=JSON.parse(k);return `${p}: ${a} ${u} × ${n} pasti`}).join(' · ')}
 const GENERAL_DEPTS=['Frutta e verdura','Carne','Pesce','Latticini e uova','Salumi','Cereali e pane','Legumi','Condimenti','Frutta secca e snack','Integratori','Bevande','Casa e pulizia','Igiene','Altro'];
 const TOSANO_AISLES=[
   ['0A','Frutta'],['0B','Verdura'],['0C','Carne fresca'],['0D','Carne congelata'],['0E','Pesce fresco'],['0F','Pesce congelato'],
@@ -368,10 +370,20 @@ function inferTosanoAisle(x){
   const manual=manualAisle(x.name);if(manual)return manual;
   const n=normalizeName(x.name),dep=normalizeName(x.department),cats=normalizeName((x.categoryLabels||[]).join(' ')),all=`${n} ${dep} ${cats}`;
   const frozen=hasAny(n,['surgel','congel','frozen']);
+  // Specific product identity wins over generic categories and packaging words.
+  if(/\btonno\b/.test(n)&&!/fresco|trancio|bistecca|filetto fresco/.test(n))return'15';
+  if(/nutella|crema.*nocciole|cioccolato spalmabile/.test(n))return'8';
+  if(/^latte\b/.test(n)&&!/detergente|corpo|solare/.test(n))return /speciale|infanzia|soia|avena|riso|mandorla|senza lattosio/.test(n)?'25':'27';
+  if(/ricotta|yogurt|fiocchi di latte|mozzarella|grana|parmigiano|feta/.test(n))return'27';
+  if(/^pasta\b/.test(n))return /fresca/.test(n)?'28':'13';
+  if(/^farina\b|farina di/.test(n))return'16';
+  if(/^pomodor[io]\b/.test(n))return /passat|sugo|pelat|conserva/.test(n)?'16':'0B';
+  if(/^(pesca|pesche|mela|mele|banana|banane|pera|pere)$/.test(n))return'0A';
+
   if(hasAny(n,['birra','radler']))return'4';
   if(hasAny(n,['spumante','prosecco','champagne','aperitivo','vino liquoroso']))return'5';
   if((n.includes('vino')||n.includes('magnum'))&&!n.includes('aceto'))return'6';
-  if(hasAny(n,['vodka','gin','grappa','amaro','liquore','sciroppo']))return'7';
+  if(/\b(vodka|gin|grappa|amaro|liquore)\b/.test(n))return'7';
   if(hasAny(n,['carta igienica','tovaglia']))return'21';
   if(hasAny(n,['tovagliol','pellicol','plastica','piatti monouso','bicchieri monouso','picnic','incontinenza']))return'22';
   if(hasAny(n,['detersivo piatti','detersivo bucato','detersivi piatti','detersivi bucato']))return'20';
@@ -381,7 +393,7 @@ function inferTosanoAisle(x){
   if(hasAny(n,['lettiera','cibo gatto','cibo cane','crocchette gatto','crocchette cane','guinzaglio','insetticida']))return'17';
   if(hasAny(n,['scopa','tappeto','guanti','sacchi','profumo casa','lumini','cucito','giardinaggio']))return'18';
   if(hasAny(n,['maionese','ketchup','latte infanzia','omogeneizzato']))return'25';
-  if(hasAny(n,['panna','latte condensato','cotechino','sottolio','sott oli','salsa']))return'26';
+  if(hasAny(n,['panna','latte condensato','cotechino','salsa']))return'26';
   if(hasAny(n,['sottaceto','sott aceto','pasta fresca','gelato']))return'28';
   if(hasAny(n,['marmellata','confettura','cioccolato spalmabile','caffe','capsule caffe','tisana']))return'8';
   if(hasAny(n,['patatine','salatini','gallette','preparato per dolci','senza glutine']))return'9';
@@ -390,7 +402,7 @@ function inferTosanoAisle(x){
   if(hasAny(n,['fette biscottate','cracker','grissin','tarall','pane']))return'12';
   if(n.includes('pasta')&&!n.includes('pasta fresca')&&!n.includes('pasta integrale al pomodoro fresco'))return'13';
   if(hasAny(n,['riso','quinoa','lenticch','ceci','fagioli','piselli secchi','legumi','aduki','borlotti','cannellini','dado','piatto pronto','etnico']))return'14';
-  if(hasAny(n,['olio','tonno sott olio','tonno in scatola','carne in scatola','acciugh']))return'15';
+  if(/\bolio\b|tonno sott olio|tonno in scatola|carne in scatola|acciugh/.test(n))return'15';
   if(hasAny(n,['farina','polenta','passata','sugo','pesto']))return'16';
   if(hasAny(n,['acqua naturale','acqua frizzante'])||n==='acqua'||n==='acque')return'1';
   if(hasAny(n,['energy drink','bicarbonato','te freddo','the freddo','ice tea']))return'2';
@@ -442,10 +454,8 @@ function shopContainer(){return shoppingModeOpen?$('shopModeOverlay'):$('shoppin
 function currentShopScroll(){return shoppingModeOpen?$('shopModeOverlay').scrollTop:window.scrollY}
 function restoreShopScroll(v){requestAnimationFrame(()=>setTimeout(()=>{if(shoppingModeOpen)$('shopModeOverlay').scrollTop=v;else window.scrollTo({top:v,behavior:'auto'})},30))}
 async function checkShopItem(x,checked){
-  const r=shopRange(),cid=rangeCheckId(x,r),peek=alphaPeek,previous=checks[cid];
-  const data={checked,key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,basis:shoppingBasis(x),updatedAt:Date.now()};
-  checks[cid]=data;if(peek)alphaPeek=null;renderShopping();renderPortions();if(peek)restoreShopScroll(peek.scrollPos);
-  try{await setDoc(doc(db,'households',householdId,'checks',cid),data)}catch(e){if(previous)checks[cid]=previous;else delete checks[cid];renderShopping();renderPortions();alert('Spunta non salvata: '+e.message)}
+  const r=shopRange(),cid=rangeCheckId(x,r),data={checked,key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,basis:shoppingBasis(x),updatedAt:Date.now()};
+  try{queueLocal('checks',cid,data);checks[cid]=data;renderShopping();renderPortions();window.PCSavings?.render()}catch(e){alert('Spunta non salvata: '+e.message);renderShopping()}
 }
 function shopMeta(x,mode){
   if(mode==='tosano'){
@@ -464,7 +474,7 @@ function renderShopRow(box,x,r,mode,fullscreen){
   const done=itemChecked(x,r);
   const row=document.createElement('div');row.className='shoprow'+(done?' checked':'')+(fullscreen?' shoprowMode':'');row.dataset.itemKey=x.key;
   const pieces=approxPieces(x),aisle=inferTosanoAisle(x),manual=!!manualAisle(x.name);
-  row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${shopMeta(x,mode)}</div>${mode==='tosano'?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'✎ reparto '+aisle:'✎ '+aisle+' automatico'):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${shoppingAdjustment(x)?`<small>Previsti: ${baseQty(x)}</small>`:''}<button class="editShopQuantity">Modifica quantità</button>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
+  row.innerHTML=`<input type="checkbox" ${done?'checked':''}><div class="shopMain"><b>${safeText(x.name)}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}<div class="muted shopMeta">${safeText(shopMeta(x,mode))}</div><div class="servings">${safeText(servingsText(x))}</div>${true?`<button class="aisleEdit ${aisle?'':'unknown'}">${aisle?(manual?'Cambia reparto Tosano · '+aisle:'Cambia reparto Tosano · '+aisle):'Assegna reparto'}</button>`:''}</div><div class="shopQty"><b>${qty(x)}</b>${shoppingAdjustment(x)?`<small>Previsti: ${baseQty(x)}</small>`:''}<button class="editShopQuantity">Modifica quantità</button>${pieces?`<small>${pieces}</small>`:''}${x.extra?'<button class="danger deleteExtra">Elimina</button>':''}</div>`;
   row.querySelector('.editShopQuantity').onclick=()=>editShoppingQuantity(x);
   row.querySelector('input').onchange=e=>checkShopItem(x,e.target.checked);
   row.querySelector('.aisleEdit')?.addEventListener('click',()=>openAisleModal(x));
@@ -520,6 +530,8 @@ function renderShopping(){
   if($('shopInfo'))$('shopInfo').textContent=`${arr.length} voci · ${shopRangeLabel(r)}`;
   if(shoppingModeOpen){renderShopList($('shopModeList'),{fullscreen:true});$('shopModeInfo').textContent=`${$('shopSort').selectedOptions[0].textContent} · ${shopRangeLabel(r)}`;$('shopModeRemaining').textContent=`${arr.filter(x=>!itemChecked(x,r)).length} da prendere`}
   renderAlphaIndex();
+  cacheShoppingSnapshot();
+  window.PCSavings?.render();
   if(alphaResultLetter&&!$('alphaResultOverlay')?.classList.contains('hidden'))renderAlphaResult()
 }
 function openAisleModal(x){
@@ -527,7 +539,7 @@ function openAisleModal(x){
   sel.value=manualAisle(x.name)||'AUTO';$('aisleItemName').textContent=x.name;$('aisleModal').dataset.itemName=x.name;$('aisleModal').classList.remove('hidden')
 }
 $('cancelAisle')?.addEventListener('click',()=>$('aisleModal').classList.add('hidden'));
-$('saveAisle')?.addEventListener('click',async()=>{const name=$('aisleModal').dataset.itemName,v=$('aisleSelect').value,ref=doc(db,'households',householdId,'storeMappings',mappingDocId(name));if(v==='AUTO')await deleteDoc(ref);else await setDoc(ref,{storeId:TOSANO_STORE_ID,name,aisle:v,updatedAt:Date.now()});$('aisleModal').classList.add('hidden')});
+$('saveAisle')?.addEventListener('click',()=>{const name=$('aisleModal').dataset.itemName,v=$('aisleSelect').value,id=mappingDocId(name),data={storeId:TOSANO_STORE_ID,name,aisle:v==='AUTO'?null:v,updatedAt:Date.now()};try{queueLocal('storeMappings',id,data);storeMappings[id]=data;$('aisleModal').classList.add('hidden');renderShopping()}catch(e){alert(e.message)}});
 $('shopSort').onchange=()=>{alphaPeek=null;renderShopping()};
 $('hideChecked').onclick=()=>{hideDone=!hideDone;$('hideChecked').textContent='Nascondi presi: '+(hideDone?'SÌ':'NO');renderShopping()};
 $('addExtra').onclick=openExtraModal;
@@ -664,28 +676,8 @@ function renderAlphaResult(){
   header.textContent=letter;
   list.appendChild(header);
 
-  for(const x of arr){
-    const done=itemChecked(x,r);
-    const row=document.createElement('div');
-    row.className='shoprow alphaResultRow'+(done?' checked':'');
-    const pieces=approxPieces(x);
-    row.innerHTML=`<input type="checkbox" ${done?'checked':''}>
-      <div class="shopMain">
-        <b>${x.name}</b>${x.extra?'<span class="extraBadge">EXTRA</span>':''}
-        <div class="muted shopMeta">${x.department||'Altro'}</div>
-      </div>
-      <div class="shopQty"><b>${qty(x)}</b>${shoppingAdjustment(x)?`<small>Previsti: ${baseQty(x)}</small>`:''}<button class="editShopQuantity">Modifica quantità</button>${pieces?`<small>${pieces}</small>`:''}</div>`;
+  for(const x of arr)renderShopRow(list,x,r,shopSortMode(),false);
 
-    row.querySelector('.editShopQuantity').onclick=()=>editShoppingQuantity(x);
-    row.querySelector('input').onchange=e=>{
-      const checked=e.target.checked;
-      const returnPos=alphaReturnScroll;
-      closeAlphaResult();
-      checkShopItem(x,checked);
-      restoreShopScroll(returnPos);
-    };
-    list.appendChild(row);
-  }
 }
 
 function portionableItem(it){const d=it.department||'';return ['Carne','Pesce','Salumi','Latticini e uova','Cereali e pane','Legumi','Frutta secca e snack'].includes(d)}
@@ -1029,7 +1021,7 @@ function editShoppingQuantity(x){
   const r=shopRange(),cid=rangeCheckId(x,r),a=shoppingAdjustment(x),amount=a?.amount??(x.extra?x.qty:x.grams>0?x.grams:x.count),unit=a?.unit??(x.extra?x.unit:x.grams>0?'g':x.unit||'pz');
   const dialog=editorDialog('Quantità da acquistare',`<p><b>${safeText(x.name)}</b></p><p>Previsti: ${safeText(baseQty(x))}</p><div class="grid2"><label>Da comprare<input name="amount" required type="number" min="0" step="any" value="${Number(amount)||0}"></label><label>Unità<select name="unit">${[...new Set([unit,'g','kg','pz','confezioni','ml','L'])].filter(Boolean).map(u=>`<option value="${safeText(u)}" ${u===unit?'selected':''}>${safeText(u)}</option>`).join('')}</select></label></div><p class="small">Vale per ${safeText(shopRangeLabel(r))}. Non cambia la dieta o le porzioni. Se cambia il totale previsto, si torna automaticamente al calcolo della dieta.</p><button class="resetQuantity" type="button">Ripristina quantità prevista</button>`);
   const ref=doc(db,'households',householdId,'shopAdjustments',cid),f=dialog.querySelector('form');
-  async function persist(reset){const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{if(reset){await setDoc(ref,{basis:'reset',periodId:r.periodId});shopAdjustments[cid]={basis:'reset',periodId:r.periodId}}else{const data={amount:dietNumber(f.elements.amount.value),unit:f.elements.unit.value,basis:shoppingBasis(x),key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()};await setDoc(ref,data);shopAdjustments[cid]=data}renderShopping();dialog.close()}catch(e){dialog.querySelector('.dialogError').textContent='Salvataggio non riuscito: '+e.message;buttons.forEach(b=>b.disabled=false)}}
+  async function persist(reset){const buttons=[...dialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{if(reset){queueLocal('shopAdjustments',cid,{basis:'reset',periodId:r.periodId,updatedAt:Date.now()});shopAdjustments[cid]={basis:'reset',periodId:r.periodId}}else{const data={amount:dietNumber(f.elements.amount.value),unit:f.elements.unit.value,basis:shoppingBasis(x),key:x.key,periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,updatedAt:Date.now()};queueLocal('shopAdjustments',cid,data);shopAdjustments[cid]=data}renderShopping();dialog.close()}catch(e){dialog.querySelector('.dialogError').textContent='Salvataggio non riuscito: '+e.message;buttons.forEach(b=>b.disabled=false)}}
   f.onsubmit=e=>{e.preventDefault();persist(false)};dialog.querySelector('.resetQuantity').onclick=()=>persist(true);
 }
 function foodAmount(it){return it.grams!=null?`${it.grams} g`:it.quantity!=null?`${it.quantity} ${it.unit||'pz'}`:''}
@@ -1183,4 +1175,30 @@ async function saveExtraForPeriod(){
     await setDoc(ref,{name,qty:amount,unit:cleanDietName($('extraUnit').value)||'pz',department:$('extraDept').value,createdAt:Date.now(),periodId:range.periodId,rangeFrom:range.from,rangeTo:range.to});
     $('modal').classList.add('hidden');extraTargetRange=null;
   }catch(e){$('extraError').textContent='Extra non salvato: '+e.message}finally{button.disabled=false}
+}
+
+// v19: offline outbox, independent emergency list, optional savings workspace.
+let offlineFlushing=false,savingsStarted=false,snapshotTimer;const snapshotLoaded=new Set();
+function queueLocal(kind,id,data){PCOffline.queue(user.uid,householdId,kind,id,data);flushOffline()}
+async function flushOffline(){
+ if(offlineFlushing||!user||!householdId||!navigator.onLine)return;
+ offlineFlushing=true;try{for(const q of PCOffline.pending().filter(q=>q.uid===user.uid&&q.hid===householdId)){
+ const ref=doc(db,'households',householdId,q.kind,q.id);
+ const applied=await runTransaction(db,async tx=>{const current=await tx.get(ref);if(!current.exists()||(current.data().updatedAt||0)<=q.data.updatedAt){tx.set(ref,q.data);return q.data}return current.data()});
+ PCOffline.ack(q.token);const latest=PCOffline.pending().find(n=>n.uid===q.uid&&n.hid===q.hid&&n.kind===q.kind&&n.id===q.id)?.data||applied;if(q.kind==='checks')checks[q.id]=latest;if(q.kind==='storeMappings')storeMappings[q.id]=latest;if(q.kind==='shopAdjustments')shopAdjustments[q.id]=latest;
+
+ }}catch(e){$('offlineStatus').textContent='Modifiche salvate sul telefono, sincronizzazione da riprovare: '+e.message}finally{offlineFlushing=false;renderShopping()}
+}
+setInterval(()=>{if(PCOffline.pending().length)flushOffline()},30000);
+window.addEventListener('online',flushOffline);
+window.addEventListener('focus',flushOffline);
+function shoppingExport(){const r=shopRange();return {range:r,items:allShopItems(r).map(x=>({key:x.key,name:x.name,quantity:qty(x),amount:shoppingAdjustment(x)?.amount??(x.extra?Number(x.qty):x.grams??x.count),unit:shoppingAdjustment(x)?.unit??x.unit??'g',basis:shoppingBasis(x),checked:itemChecked(x,r),checkId:rangeCheckId(x,r),department:x.department,aisle:inferTosanoAisle(x),pieces:approxPieces(x),servings:servingsText(x)}))}}
+function cacheShoppingSnapshot(){
+ clearTimeout(snapshotTimer);snapshotTimer=setTimeout(()=>{if(!user||!householdId||!Object.keys(profiles).length||snapshotLoaded.size<7)return;try{
+ const payload=shoppingExport();PCOffline.write('pc19_snapshot',{...payload,offers:window.PCSavings?.offlineOffers(payload)||null,uid:user.uid,hid:householdId,at:Date.now(),aisles:TOSANO_AISLES,mappingIds:Object.fromEntries(payload.items.map(x=>[x.key,mappingDocId(x.name)]))});
+ $('offlineStatus').textContent=`Lista salvata sul telefono · ${PCOffline.pending().filter(q=>q.uid===user.uid).length} modifiche da sincronizzare`;
+ }catch(e){$('offlineStatus').textContent='Copia offline NON salvata: memoria locale non disponibile.'}},150)
+}
+function startSavings(){if(savingsStarted)return;savingsStarted=true;
+ window.PCSavings.init({getList:shoppingExport,changed:cacheShoppingSnapshot,getUser:()=>({uid:user.uid,hid:householdId}),check:(key,done)=>{const x=allShopItems().find(x=>x.key===key);if(x)checkShopItem(x,done)},listen:cb=>{listeners.push(onSnapshot(collection(db,'households',householdId,'savings'),s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),e=>window.PCSavings.message(e.message)))},save:(id,data)=>queueLocal('savings',id,{...data,updatedAt:Date.now()}),addExtra:(name,amount,unit)=>{const r=shopRange(),id=crypto.randomUUID();const data={name,qty:amount,unit,department:'Altro',periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,createdAt:Date.now(),updatedAt:Date.now()};queueLocal('extras',id,data);extras.push({id,...data});renderShopping();return 'extra:'+id},pending:()=>PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='savings')});
 }
