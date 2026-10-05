@@ -1,0 +1,40 @@
+PIANOCASA v19.1
+Carica tutti i file di questo ZIP nella stessa cartella di index.html su GitHub,
+sovrascrivendo gli esistenti. Configurazione e dati Firebase restano invariati.
+Attendi la pubblicazione, chiudi/riapri l'app e verifica v19.1 nell'intestazione.
+
+- I periodi salvati vengono conservati nell'elenco. Un nuovo periodo non cancella
+  menu, spunte o extra dei precedenti. Eccezione storica: il vecchio filtro di date
+  precedente ai veri periodi può non comparire se sovrapposto al primo periodo creato;
+  i menu restano comunque salvati per data.
+- All'avvio normale viene mostrata Oggi con la data reale e, se esiste, il periodo
+  che la contiene. Questa scelta iniziale non cambia il periodo sul telefono dell'altro.
+  Senza un periodo che includa oggi appare un messaggio, non una data diversa.
+  Puoi poi scegliere manualmente altri giorni e periodi. Dopo almeno un minuto in
+  background, il ritorno all'app ripristina Oggi, salvo dialoghi aperti o link menu.
+  I collegamenti Siri/notifiche a un menu specifico mantengono quel comportamento.
+- L'avviso e il collegamento offline sono solo nella sezione Spesa. Se il telefono
+  risulta offline all'avvio ed esiste una copia locale, si apre direttamente la spesa
+  offline. Occorre aver preparato la copia con internet almeno una volta.
+- Tolto “verifica il peso” dalle indicazioni dei pezzi; restano stima e intervallo.
+- Il TXT per ChatGPT inizia con CAP, distanza massima in km e giorno della spesa.
+  Chiede di ripeterli nella risposta, cercare anche fuori dal comune entro il limite,
+  dichiarare come sono misurate le distanze e non promettere copertura completa.
+  Importazione: rifiuta distanze numeriche fuori limite; distanze mancanti rimangono
+  non verificate. Non è un motore cartografico: non verifica autonomamente i percorsi.
+
+USO RISPARMIO
+1. Scegli il periodo e correggi la lista della Spesa.
+2. Risparmio > Confronto: inserisci CAP, distanza e data. Prepara un NUOVO TXT.
+3. Allega quel TXT a ChatGPT e scrivi: “Esegui la ricerca descritta nel file e
+   restituisci anche il file JSON importabile in PianoCasa”.
+4. Scarica il JSON prodotto da ChatGPT. Torna a Risparmio > Importa confronto.
+5. Scegli il negozio e le offerte. Le spunte coincidono con quelle di Spesa.
+Se la lista cambia, prepara una nuova ricerca. La vecchia esportazione non cambia
+quando aggiorni l'app. Un totale incompleto è un subtotale, non un confronto certo.
+Nessun accesso diretto al tuo account ChatGPT o ricerca automatica in background.
+
+Verifiche: test di logica e interfaccia simulata, esportazione CAP 33016/100 km,
+periodi precedenti conservati, selezione del periodo di oggi, funzioni offline v19.
+Nessuna prova reale su iPhone/Safari. Le altre istruzioni v19 rimangono valide,
+tranne la posizione dell'avviso offline e l'avvio, aggiornati qui.

@@ -22,7 +22,7 @@
  if(!Array.isArray(report.stores)||!report.stores.length||report.stores.length>30)throw Error('Elenco supermercati non valido.');
  const keys=new Set(request.list.items.map(x=>x.key));
  function price(p){if(!p||!Number.isSafeInteger(p.totalCents)||p.totalCents<0||!Number.isFinite(p.amount)||p.amount<=0||!Number.isInteger(p.packages)||p.packages<1||typeof p.unit!=='string'||typeof p.product!=='string')throw Error('Prezzo, prodotto o confezioni non validi.');if(!/^https:\/\//.test(p.source||''))throw Error('Ogni prezzo deve avere un link HTTPS alla fonte.');if(!/^\d{4}-\d{2}-\d{2}$/.test(p.validUntil||''))throw Error('Manca la validità del prezzo.');}
- for(const s of report.stores){if(!s.name||!s.address||!Array.isArray(s.items))throw Error('Negozio incompleto.');const used=new Set();for(const x of s.items){if(!keys.has(x.key)||used.has(x.key))throw Error('Prodotto estraneo o duplicato.');used.add(x.key);if(x.base)price(x.base);if(x.offer)price(x.offer);}}
+ for(const s of report.stores){if(s.distanceKm!=null&&(!Number.isFinite(s.distanceKm)||s.distanceKm<0||s.distanceKm>request.radius))throw Error('Negozio fuori dalla distanza massima o distanza non valida: '+s.name);if(!s.name||!s.address||!Array.isArray(s.items))throw Error('Negozio incompleto.');const used=new Set();for(const x of s.items){if(!keys.has(x.key)||used.has(x.key))throw Error('Prodotto estraneo o duplicato.');used.add(x.key);if(x.base)price(x.base);if(x.offer)price(x.offer);}}
  if(report.suggestions){if(!Array.isArray(report.suggestions)||report.suggestions.length>100)throw Error('Suggerimenti non validi');for(const p of report.suggestions)price(p);}
  return report;
  }

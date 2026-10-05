@@ -6,6 +6,7 @@ const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_'
 let app,auth,db,user,userDoc,householdId,member,householdDoc={},profiles={},days=[],extras=[],checks={},storeMappings={},portionChecks={},currentProfileId,currentDate=isoToday(),listeners=[],hideDone=false,siriSyncTimer=null;
 let dietDraft=null,dietBase=null,dietPid=null,dietDirty=false,shopAdjustments={};
 let extraTargetRange=null;
+let todayLanding=true,localPlanningPeriodId=null;
 let lastPlanningPeriodId=null,periodFormDirty=false,periodWritePending=false;
 let expandedCats=new Set(),scrollAfterRender=null;
 let menuOverlayDate=new URLSearchParams(location.search).get('menu')||null;
@@ -120,7 +121,7 @@ function nextMissingCategory(p,d,currentCatId){
   for(let i=0;i<=start;i++)if(!selectedItem(p,d,cats[i]))return cats[i];
   return null;
 }
-function setCurrentDate(date){const b=planBounds();currentDate=date<b.from?b.from:date>b.to?b.to:date;expandedCats.clear();scrollAfterRender=null;renderToday()}
+function setCurrentDate(date){todayLanding=false;const b=planBounds();currentDate=date<b.from?b.from:date>b.to?b.to:date;expandedCats.clear();scrollAfterRender=null;renderToday()}
 function scrollToCategory(id){
   if(!id)return;
   requestAnimationFrame(()=>setTimeout(()=>{
@@ -156,6 +157,13 @@ function partnerChoiceFor(p,meal,c,date){
 }
 function renderToday(){
   const p=profiles[currentProfileId];if(!p)return;
+  if(todayLanding&&(currentDate<planBounds().from||currentDate>planBounds().to)){
+    $('todayTitle').textContent=fmt(currentDate);$('profileLabel').textContent=p.displayName;
+    $('todayDateSelect').innerHTML=`<option>${safeText(fmt(currentDate,true))}</option>`;
+    $('prevDay').disabled=true;$('nextDay').disabled=true;$('kcalTotal').textContent='—';$('kcalState').textContent='Nessun periodo per oggi';$('kcalBar').style.width='0%';
+    $('completionBanner').textContent='Oggi non rientra in un periodo salvato. Crea un periodo che includa oggi oppure scegli un periodo dall’elenco per consultarlo.';
+    $('freqInfo').textContent='';$('usagePeriodHint').textContent='';$('meals').replaceChildren();return;
+  }
   const usage=foodUsageUntil(currentDate),bounds=planBounds();$('prevDay').disabled=currentDate<=bounds.from;$('nextDay').disabled=currentDate>=bounds.to;
   $('usagePeriodHint').textContent=`Conteggi: scelte dal ${fmt(bounds.from,true)} al ${fmt(currentDate,true)}, giorno incluso. Non indicano le scorte in casa.`;
   const d=dayDoc(p.id,currentDate),missing=missingCategories(p,d),total=totalKcal(p,d);
@@ -349,7 +357,7 @@ function approxPieces(x){
   if(!grams)return '';const n=normalizeName(x.name);let w=PIECE_WEIGHTS[n];
   if(!w&&/^pomodor[io] (da|per) insalata$/.test(n))w=[120,200];
   if(!w)return '';const lo=Math.max(1,Math.ceil(grams/w[1])),hi=Math.max(lo,Math.ceil(grams/w[0]));
-  return `≈ ${lo===hi?lo:lo+'–'+hi} pz · stima ${w[0]}–${w[1]} g/pz, verifica il peso`;
+  return `≈ ${lo===hi?lo:lo+'–'+hi} pz · stima ${w[0]}–${w[1]} g/pz`;
 }
 function servingsText(x){const groups=new Map();for(const v of x.servings||[]){const k=JSON.stringify([v.person,v.amount,v.unit]);groups.set(k,(groups.get(k)||0)+1)}return [...groups].map(([k,n])=>{const [p,a,u]=JSON.parse(k);return `${p}: ${a} ${u} × ${n} pasti`}).join(' · ')}
 const GENERAL_DEPTS=['Frutta e verdura','Carne','Pesce','Latticini e uova','Salumi','Cereali e pane','Legumi','Condimenti','Frutta secca e snack','Integratori','Bevande','Casa e pulizia','Igiene','Altro'];
@@ -943,7 +951,7 @@ $('importSeed').onclick=async()=>{try{const f=$('seedFile').files[0];if(!f)throw
 function renderRules(){const p=profiles[currentProfileId],box=$('rulesList');if(!p||!box)return;box.innerHTML='';for(const r of p.rules||[]){const d=document.createElement('div');d.className='rule';d.innerHTML=`<b>${r.label}</b><span class="muted">${r.disabledWhen?'bloccato quando '+r.disabledWhen:`massimo ${r.maxCount} ogni ${r.days} giorni`} · ${r.source||''}</span>`;box.appendChild(d)}for(const mn of p.minimums||[]){const d=document.createElement('div');d.className='rule';d.innerHTML=`<b>${mn.label}</b><span class="muted">obiettivo ${mn.minCount}${mn.targetMax?'–'+mn.targetMax:''} ogni ${mn.days} giorni</span>`;box.appendChild(d)}}
 function handleMenuDeepLink(date){
   const d=date||new URL(location.href).searchParams.get('menu')||isoToday();
-  menuOverlayDate=d;currentDate=d;
+  todayLanding=false;menuOverlayDate=d;currentDate=d;
   const u=new URL(location.href);u.searchParams.set('menu',d);history.replaceState({},'',u);
   if(Object.keys(profiles).length)renderMenuOverlay(d);
 }
@@ -1036,14 +1044,14 @@ function dietFingerprint(value){
 // v18 — shared planning periods. A date belongs to at most one saved period.
 function legacyPlanningPeriod(){const b=legacyPlanBounds();return{id:'legacy_'+b.from+'_'+b.to,from:b.from,to:b.to,legacy:true}}
 function planningPeriods(){return householdDoc.planningPeriods?.length?householdDoc.planningPeriods:[legacyPlanningPeriod()]}
-function activePlanningPeriod(){const periods=planningPeriods();return periods.find(p=>p.id===householdDoc.activePlanningPeriodId)||periods.at(-1)}
+function activePlanningPeriod(){const periods=planningPeriods();return periods.find(p=>p.id===localPlanningPeriodId)||(todayLanding?periods.find(p=>isoToday()>=p.from&&isoToday()<=p.to):null)||periods.find(p=>p.id===householdDoc.activePlanningPeriodId)||periods.at(-1)}
 function isLegacyPeriod(id=activePlanningPeriod().id){return planningPeriods().some(p=>p.id===id&&p.legacy)}
 function applyPlanningPeriod(){
   if(!Object.keys(profiles).length)return;
   const period=activePlanningPeriod();if(lastPlanningPeriodId===period.id)return;
   lastPlanningPeriodId=period.id;shopRangeMode='all';shopCustomStart='';shopCustomEnd='';alphaPeek=null;hideDone=false;
   $('hideChecked').textContent='Nascondi presi: NO';expandedCats.clear();scrollAfterRender=null;
-  const today=isoToday();currentDate=today>=period.from&&today<=period.to?today:period.from;
+  const today=isoToday();currentDate=todayLanding?today:(today>=period.from&&today<=period.to?today:period.from);
   if(!periodFormDirty){$('startDate').value=addDays(period.to,1);$('endDate').value=addDays(period.to,14)}
 }
 function renderPlanningPeriod(){
@@ -1074,14 +1082,14 @@ async function createPlanningPeriod(){
     appendPlanningPeriod(householdDoc,legacy,period);periodWritePending=true;button.disabled=true;renderPlanningPeriod();
     let saved;
     await runTransaction(db,async tx=>{const ref=doc(db,'households',householdId),s=await tx.get(ref);if(!s.exists())throw new Error('Famiglia non trovata.');const house=s.data();const list=appendPlanningPeriod(house,legacy,period);saved={...house,planningPeriods:list,activePlanningPeriodId:period.id};tx.update(ref,{planningPeriods:list,activePlanningPeriodId:period.id})});
-    householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';$('planningPeriodDialog').close();window.scrollTo({top:0,behavior:'smooth'});
+    todayLanding=false;localPlanningPeriodId=period.id;householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';$('planningPeriodDialog').close();window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){$('periodMessage').textContent='Periodo non creato: '+e.message}finally{periodWritePending=false;button.disabled=false;renderPlanningPeriod()}
 }
 async function activatePlanningPeriod(id){
   if(periodWritePending)return;
   if(!planningPeriods().some(p=>p.id===id)){renderPlanningPeriod();return}
   periodWritePending=true;renderPlanningPeriod();
-  try{await updateDoc(doc(db,'households',householdId),{activePlanningPeriodId:id});householdDoc.activePlanningPeriodId=id;periodFormDirty=false;renderAll()}
+  try{await updateDoc(doc(db,'households',householdId),{activePlanningPeriodId:id});todayLanding=false;localPlanningPeriodId=id;lastPlanningPeriodId=null;householdDoc.activePlanningPeriodId=id;periodFormDirty=false;renderAll()}
   catch(e){alert('Cambio periodo non salvato: '+e.message)}finally{periodWritePending=false;renderPlanningPeriod()}
 }
 function extraInPeriod(extra,range=shopRange()){
@@ -1202,3 +1210,9 @@ function cacheShoppingSnapshot(){
 function startSavings(){if(savingsStarted)return;savingsStarted=true;
  window.PCSavings.init({getList:shoppingExport,changed:cacheShoppingSnapshot,getUser:()=>({uid:user.uid,hid:householdId}),check:(key,done)=>{const x=allShopItems().find(x=>x.key===key);if(x)checkShopItem(x,done)},listen:cb=>{listeners.push(onSnapshot(collection(db,'households',householdId,'savings'),s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),e=>window.PCSavings.message(e.message)))},save:(id,data)=>queueLocal('savings',id,{...data,updatedAt:Date.now()}),addExtra:(name,amount,unit)=>{const r=shopRange(),id=crypto.randomUUID();const data={name,qty:amount,unit,department:'Altro',periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,createdAt:Date.now(),updatedAt:Date.now()};queueLocal('extras',id,data);extras.push({id,...data});renderShopping();return 'extra:'+id},pending:()=>PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='savings')});
 }
+
+// A normal launch/resume returns to the real current day without changing the shared period.
+function openActualToday(){if(new URL(location.href).searchParams.has('menu')||document.querySelector('dialog[open]'))return;todayLanding=true;localPlanningPeriodId=null;lastPlanningPeriodId=null;currentDate=isoToday();menuOverlayDate=null;closeMenuOverlay();tab('today');renderAll()}
+let hiddenSince=0;
+document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenSince=Date.now();else if(hiddenSince&&Date.now()-hiddenSince>60000){hiddenSince=0;if(householdId)openActualToday()}});
+window.addEventListener('pageshow',e=>{if(e.persisted&&householdId)openActualToday()});
