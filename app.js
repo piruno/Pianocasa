@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { initializeAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, indexedDBLocalPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { initializeAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, indexedDBLocalPersistence, browserLocalPersistence } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getFirestore, runTransaction, doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField, collection, getDocs, onSnapshot, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 const $=id=>document.getElementById(id), C=window.PIANOCASA_CONFIG||{};
 const badConfig=!C.firebase||String(C.firebase.apiKey||'').startsWith('INCOLLA_');
@@ -121,7 +121,20 @@ function nextMissingCategory(p,d,currentCatId){
   for(let i=0;i<=start;i++)if(!selectedItem(p,d,cats[i]))return cats[i];
   return null;
 }
-function setCurrentDate(date){todayLanding=false;const b=planBounds();currentDate=date<b.from?b.from:date>b.to?b.to:date;expandedCats.clear();scrollAfterRender=null;renderToday()}
+function setCurrentDate(date){
+  const period=planningPeriods().find(p=>date>=p.from&&date<=p.to);
+  if(!period)return;
+  todayLanding=false;localPlanningPeriodId=period.id;
+  applyPlanningPeriod();currentDate=date;expandedCats.clear();scrollAfterRender=null;renderAll();
+}
+function availableMenuDates(){return [...new Set(planningPeriods().flatMap(p=>datesBetween(p.from,p.to)))].sort()}
+function adjacentMenuDate(direction){const dates=availableMenuDates();return direction>0?dates.find(d=>d>currentDate):dates.filter(d=>d<currentDate).at(-1)}
+function moveMenuDay(direction){const date=adjacentMenuDate(direction);if(date)setCurrentDate(date)}
+function updateDayArrows(){
+  $('prevDay').disabled=!adjacentMenuDate(-1);$('nextDay').disabled=!adjacentMenuDate(1);
+  $('prevDay').setAttribute('aria-label','Giorno precedente nei periodi salvati');$('nextDay').setAttribute('aria-label','Giorno successivo nei periodi salvati');
+}
+
 function scrollToCategory(id){
   if(!id)return;
   requestAnimationFrame(()=>setTimeout(()=>{
@@ -160,11 +173,11 @@ function renderToday(){
   if(todayLanding&&(currentDate<planBounds().from||currentDate>planBounds().to)){
     $('todayTitle').textContent=fmt(currentDate);$('profileLabel').textContent=p.displayName;
     $('todayDateSelect').innerHTML=`<option>${safeText(fmt(currentDate,true))}</option>`;
-    $('prevDay').disabled=true;$('nextDay').disabled=true;$('kcalTotal').textContent='—';$('kcalState').textContent='Nessun periodo per oggi';$('kcalBar').style.width='0%';
+    updateDayArrows();$('kcalTotal').textContent='—';$('kcalState').textContent='Nessun periodo per oggi';$('kcalBar').style.width='0%';
     $('completionBanner').textContent='Oggi non rientra in un periodo salvato. Crea un periodo che includa oggi oppure scegli un periodo dall’elenco per consultarlo.';
     $('freqInfo').textContent='';$('usagePeriodHint').textContent='';$('meals').replaceChildren();return;
   }
-  const usage=foodUsageUntil(currentDate),bounds=planBounds();$('prevDay').disabled=currentDate<=bounds.from;$('nextDay').disabled=currentDate>=bounds.to;
+  const usage=foodUsageUntil(currentDate),bounds=planBounds();updateDayArrows();
   $('usagePeriodHint').textContent=`Conteggi: scelte dal ${fmt(bounds.from,true)} al ${fmt(currentDate,true)}, giorno incluso. Non indicano le scorte in casa.`;
   const d=dayDoc(p.id,currentDate),missing=missingCategories(p,d),total=totalKcal(p,d);
   $('todayDateSelect').innerHTML=datesBetween(bounds.from,bounds.to).map(date=>`<option value="${date}" ${date===currentDate?'selected':''}>${safeText(fmt(date,true))}</option>`).join('');
@@ -275,7 +288,9 @@ function violatesRolling(existing,candidate,maxCount,windowDays){
 function itemLimitReason(p,date,catId,it){for(const r of p.rules||[]){if(!it.tags?.includes(r.tag))continue;if(r.disabledWhen&&p.conditions?.[r.disabledWhen])return r.label+' non disponibile';if(r.maxCount&&violatesRolling(selectedOccurrences(p,r.tag,date,catId),date,r.maxCount,r.days||7))return `limite ${r.maxCount} ogni ${r.days||7} giorni`}return ''}
 function blockedReason(p,date,catId,itemId,d){const c=allCats(p).find(x=>x.id===catId),it=c?.items.find(x=>x.id===itemId);return it?itemLimitReason(p,date,catId,it):''}
 function minimumInfo(p,date){const txt=[];for(const r of p.minimums||[]){const from=addDays(date,1-(r.days||7));const n=selectedOccurrences(p,r.tag).filter(x=>x>=from&&x<=date).length;txt.push(`${r.label}: ${n}/${r.minCount} minimo negli ultimi ${r.days||7} giorni`)}return txt.join(' · ')}
-$('prevDay').onclick=()=>setCurrentDate(addDays(currentDate,-1));$('nextDay').onclick=()=>setCurrentDate(addDays(currentDate,1));
+$('prevDay').onclick=()=>moveMenuDay(-1);$('nextDay').onclick=()=>moveMenuDay(1);
+$('openSelectedPeriod').onclick=()=>activatePlanningPeriod(activePlanningPeriod().id);
+$('goActualToday').onclick=()=>openActualToday(true);
 $('copyFirstWeek').onclick=async()=>{
   const p=profiles[currentProfileId];if(!p)return;const range=planBounds();
   const target=addDays(range.from,7);
@@ -1051,7 +1066,7 @@ function isLegacyPeriod(id=activePlanningPeriod().id){return planningPeriods().s
 function applyPlanningPeriod(){
   if(!Object.keys(profiles).length)return;
   const period=activePlanningPeriod();if(lastPlanningPeriodId===period.id)return;
-  lastPlanningPeriodId=period.id;shopRangeMode='all';shopCustomStart='';shopCustomEnd='';alphaPeek=null;hideDone=false;
+  localPlanningPeriodId=period.id;lastPlanningPeriodId=period.id;shopRangeMode='all';shopCustomStart='';shopCustomEnd='';alphaPeek=null;hideDone=false;
   $('hideChecked').textContent='Nascondi presi: NO';expandedCats.clear();scrollAfterRender=null;
   const today=isoToday();currentDate=todayLanding?today:(today>=period.from&&today<=period.to?today:period.from);
   if(!periodFormDirty){$('startDate').value=addDays(period.to,1);$('endDate').value=addDays(period.to,14)}
@@ -1060,7 +1075,7 @@ function renderPlanningPeriod(){
   if(!Object.keys(profiles).length)return;
   const active=activePlanningPeriod();$('planningPeriodSelect').innerHTML=[...planningPeriods()].sort((a,b)=>a.from.localeCompare(b.from)).map(p=>`<option value="${safeText(p.id)}" ${p.id===active.id?'selected':''}>${safeText(shopRangeLabel(p))}${p.legacy?' · precedente':''}</option>`).join('');
   $('planningPeriodSelect').disabled=periodWritePending;
-  $('planningPeriodNote').textContent=active.legacy?'Crea il prossimo periodo per una nuova spesa separata.':'Periodo condiviso tra Anna e Vincenzo';
+  $('planningPeriodNote').textContent=active.legacy?'Crea il prossimo periodo per una nuova spesa separata.':'Periodi condivisi · il giorno visualizzato è indipendente su ciascun telefono';
 }
 function validPeriodDates(from,to){
   const valid=s=>/^\d{4}-\d{2}-\d{2}$/.test(s)&&!Number.isNaN(parseISO(s).getTime())&&addDays(s,0)===s;
@@ -1087,13 +1102,12 @@ async function createPlanningPeriod(){
     todayLanding=false;localPlanningPeriodId=period.id;householdDoc=saved;periodFormDirty=false;lastPlanningPeriodId=null;renderAll();setCurrentDate(period.from);$('periodMessage').textContent='Nuovo periodo creato. La spesa è separata dalle precedenti.';$('planningPeriodDialog').close();window.scrollTo({top:0,behavior:'smooth'});
   }catch(e){$('periodMessage').textContent='Periodo non creato: '+e.message}finally{periodWritePending=false;button.disabled=false;renderPlanningPeriod()}
 }
-async function activatePlanningPeriod(id){
-  if(periodWritePending)return;
+function activatePlanningPeriod(id){
   if(!planningPeriods().some(p=>p.id===id)){renderPlanningPeriod();return}
-  periodWritePending=true;renderPlanningPeriod();
-  try{await updateDoc(doc(db,'households',householdId),{activePlanningPeriodId:id});todayLanding=false;localPlanningPeriodId=id;lastPlanningPeriodId=null;householdDoc.activePlanningPeriodId=id;periodFormDirty=false;renderAll()}
-  catch(e){alert('Cambio periodo non salvato: '+e.message)}finally{periodWritePending=false;renderPlanningPeriod()}
+  todayLanding=false;localPlanningPeriodId=id;lastPlanningPeriodId=null;periodFormDirty=false;
+  renderAll();
 }
+
 function extraInPeriod(extra,range=shopRange()){
   const r=typeof range==='string'?{...shopRange(),periodId:range}:range;
   if(!extra.periodId||extra.periodId!==r.periodId)return false;
@@ -1213,11 +1227,12 @@ function startSavings(){if(savingsStarted)return;savingsStarted=true;
  window.PCSavings.init({getList:shoppingExport,changed:cacheShoppingSnapshot,getUser:()=>({uid:user.uid,hid:householdId}),check:(key,done)=>{const x=allShopItems().find(x=>x.key===key);if(x)checkShopItem(x,done)},listen:cb=>{listeners.push(onSnapshot(collection(db,'households',householdId,'savings'),s=>cb(s.docs.map(d=>({id:d.id,...d.data()}))),e=>window.PCSavings.message(e.message)))},save:(id,data)=>queueLocal('savings',id,{...data,updatedAt:Date.now()}),addExtra:(name,amount,unit)=>{const r=shopRange(),id=crypto.randomUUID();const data={name,qty:amount,unit,department:'Altro',periodId:r.periodId,rangeFrom:r.from,rangeTo:r.to,createdAt:Date.now(),updatedAt:Date.now()};queueLocal('extras',id,data);extras.push({id,...data});renderShopping();return 'extra:'+id},pending:()=>PCOffline.pending().filter(q=>q.hid===householdId&&q.kind==='savings')});
 }
 
-// A normal launch/resume returns to the real current day without changing the shared period.
-function openActualToday(){if(new URL(location.href).searchParams.has('menu')||document.querySelector('dialog[open]'))return;todayLanding=true;localPlanningPeriodId=null;lastPlanningPeriodId=null;currentDate=isoToday();menuOverlayDate=null;closeMenuOverlay();tab('today');renderAll()}
-let hiddenSince=0;
-document.addEventListener('visibilitychange',()=>{if(document.hidden)hiddenSince=Date.now();else if(hiddenSince&&Date.now()-hiddenSince>60000){hiddenSince=0;if(householdId)openActualToday()}});
-window.addEventListener('pageshow',e=>{if(e.persisted&&householdId)openActualToday()});
+// Return explicitly to the real current day without changing the shared period.
+function openActualToday(force=false){if(!force&&(new URL(location.href).searchParams.has('menu')||document.querySelector('dialog[open]')))return;todayLanding=true;localPlanningPeriodId=null;lastPlanningPeriodId=null;currentDate=isoToday();menuOverlayDate=null;closeMenuOverlay();tab('today');renderAll()}
+// A new launch starts on today. Resuming an existing session preserves deliberate navigation.
+function resumeMenu(){if(householdId&&todayLanding&&currentDate!==isoToday())openActualToday()}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)resumeMenu()});
+window.addEventListener('pageshow',e=>{if(e.persisted)resumeMenu()});
 
 // v19.2 — export only the selected saved diet, never the other family profile.
 function selectedDietForExport(){
@@ -1244,3 +1259,19 @@ function exportSelectedDiet(print){
     $('dietStatus').textContent='Dieta esportata. Allega qui in chat il file JSON scaricato per ricevere il PDF.';
   }catch(e){$('dietStatus').textContent=e.message;}
 }
+
+// v19.3 — email recovery uses Firebase's hosted reset flow and preserves the account.
+let passwordResetPending=false;
+async function resetLoginPassword(){
+  if(passwordResetPending)return;
+  const input=$('email'),button=$('resetPasswordBtn'),msg=$('authMsg'),email=input.value.trim();
+  if(!email||!input.checkValidity()){msg.textContent='Inserisci nel campo Email l’indirizzo usato per accedere a PianoCasa.';input.focus();return}
+  if(!auth){msg.textContent='Accesso non ancora pronto. Ricarica la pagina con internet e riprova.';return}
+  if(!navigator.onLine){msg.textContent='Per recuperare la password serve una connessione a internet.';return}
+  passwordResetPending=true;button.disabled=true;msg.textContent='Invio della richiesta…';
+  const success='Se questo indirizzo è associato a un account, riceverai un’email per scegliere una nuova password. Controlla anche Spam. Poi torna qui e accedi con la nuova password.';
+  try{auth.languageCode='it';await sendPasswordResetEmail(auth,email);msg.textContent=success}
+  catch(e){msg.textContent=e.code==='auth/user-not-found'?success:e.code==='auth/too-many-requests'?'Troppe richieste. Attendi qualche minuto e riprova.':e.code==='auth/network-request-failed'?'Connessione non disponibile. Riprova quando hai internet.':e.code==='auth/invalid-email'?'Controlla l’indirizzo email inserito.':'Richiesta non riuscita. Riprova più tardi. ('+(e.code||'errore')+')'}
+  finally{passwordResetPending=false;button.disabled=false}
+}
+$('resetPasswordBtn').onclick=resetLoginPassword;
